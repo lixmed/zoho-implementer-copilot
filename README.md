@@ -11,7 +11,7 @@ A local AI copilot for Zoho partners. It turns client requirements into Zoho CRM
 - Requests no record scopes in this phase, so customer data cannot reach the LLM.
 
 ## Quick start
-See [docs/setup.md](docs/setup.md).
+See [docs/setup.md](docs/setup.md). To test without spending anything (or without any Zoho account at all), see [docs/testing.md](docs/testing.md).
 
 ## Docs
 - [Zoho API coverage](docs/zoho-api-coverage.md)
