@@ -171,6 +171,119 @@ def cmd_snapshot(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_workspace_set(args: argparse.Namespace) -> int:
+    from copilot.projects.workspace import set_workspace_root
+
+    print(f"Projects folder: {set_workspace_root(Path(args.path))}")
+    return 0
+
+
+def cmd_project_new(args: argparse.Namespace) -> int:
+    from copilot.projects.workspace import create_project
+
+    if args.org:
+        OrgRegistry().get(args.org)  # fail early on a typo
+    p = create_project(args.client, args.project, org=args.org)
+    print(f"Created {p.slug} at {p.path}")
+    print(f"Drop the client's files (.md .txt .eml .docx .pdf) into {p.requirements_dir}")
+    return 0
+
+
+def cmd_project_list(args: argparse.Namespace) -> int:
+    from copilot.projects.workspace import list_projects
+
+    projects = list_projects()
+    if not projects:
+        print("No projects. Run: copilot project new 'Client' 'Project' --org <slug>")
+    for p in projects:
+        print(f"{p.slug:40} org={p.info.org or '-'}")
+    return 0
+
+
+def cmd_project_ingest(args: argparse.Namespace) -> int:
+    from copilot.projects.requirements import ingest_dir
+    from copilot.projects.workspace import open_project
+
+    units = ingest_dir(open_project(args.project).requirements_dir)
+    for u in units:
+        where = f" p{u.page}" if u.page else ""
+        print(f"{u.id:28}{where} {u.text[:100]}")
+    print(f"\n{len(units)} requirement units")
+    return 0
+
+
+def cmd_plan_show(args: argparse.Namespace) -> int:
+    from copilot.planner.store import approved_version, load_plan
+    from copilot.projects.workspace import open_project
+
+    p = open_project(args.project)
+    plan = load_plan(p, args.version)
+    approved = approved_version(p)
+    path = p.plans_dir / f"plan.v{plan.version}.md"
+    state = "APPROVED" if approved == plan.version else "not approved"
+    print(f"{p.slug} plan v{plan.version} ({state}). Read it: {path}")
+    print(f"items={len(plan.items)} questions={len(plan.questions)} tickets={len(plan.tickets)}")
+    for i in plan.issues:
+        print(f"  {i.level}: {i.ref or ''} {i.message}")
+    return 0
+
+
+def cmd_plan_approve(args: argparse.Namespace) -> int:
+    from copilot.planner.store import approve, load_plan
+    from copilot.projects.workspace import open_project
+
+    p = open_project(args.project)
+    plan = load_plan(p, args.version)
+    print(f"About to approve {p.slug} plan v{plan.version}: {len(plan.items)} items.")
+    print(f"Review first: {p.plans_dir / f'plan.v{plan.version}.md'}")
+    # strip a BOM too: PowerShell pipes one in front of redirected input
+    typed = input(f"Type the project slug ({p.slug}) to approve: ").strip().lstrip("﻿")
+    if typed != p.slug:
+        print("Not approved.", file=sys.stderr)
+        return 2
+    a = approve(p, plan.version, note=args.note)
+    print(f"Approved v{a.version} by {a.approver} at {a.approved_at:%Y-%m-%d %H:%M} UTC")
+    return 0
+
+
+def cmd_plan_diff(args: argparse.Namespace) -> int:
+    from copilot.planner.render import render_change_request
+    from copilot.planner.store import approved_version, diff_plans, load_plan
+    from copilot.projects.workspace import open_project
+
+    p = open_project(args.project)
+    new = load_plan(p, args.new)
+    old_v = args.old or approved_version(p) or new.based_on_version
+    if not old_v:
+        print("Nothing to compare against (no approved or earlier version).", file=sys.stderr)
+        return 1
+    old = load_plan(p, old_v)
+    md = render_change_request(diff_plans(old, new), old, new)
+    out = p.exports_dir / f"change-request-v{old.version}-to-v{new.version}.md"
+    out.write_text(md, encoding="utf-8")
+    print(md)
+    print(f"Saved: {out}")
+    return 0
+
+
+def cmd_plan_export(args: argparse.Namespace) -> int:
+    from copilot.planner.render import render_signoff
+    from copilot.planner.store import load_plan
+    from copilot.planner.uat import render_uat_script
+    from copilot.projects.requirements import load_units
+    from copilot.projects.workspace import open_project
+
+    p = open_project(args.project)
+    plan = load_plan(p, args.version)
+    units = load_units(p.requirements_dir)
+    renderers = {"signoff": render_signoff, "uat": render_uat_script}
+    for kind in args.what:
+        out = p.exports_dir / f"{kind}-v{plan.version}.md"
+        out.write_text(renderers[kind](plan, units, p.info.client), encoding="utf-8")
+        print(f"Wrote {out}")
+    return 0
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     from copilot.mcp_server.server import run
 
@@ -208,6 +321,46 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--out", default="snapshots")
     s.set_defaults(func=cmd_snapshot)
 
+    ws = sub.add_parser("workspace", help="where client projects live")
+    ws_sub = ws.add_subparsers(dest="ws_cmd", required=True)
+    wss = ws_sub.add_parser("set")
+    wss.add_argument("path")
+    wss.set_defaults(func=cmd_workspace_set)
+
+    pr = sub.add_parser("project", help="client projects")
+    pr_sub = pr.add_subparsers(dest="project_cmd", required=True)
+    pn = pr_sub.add_parser("new")
+    pn.add_argument("client")
+    pn.add_argument("project")
+    pn.add_argument("--org", help="connected org slug used for validation")
+    pn.set_defaults(func=cmd_project_new)
+    pr_sub.add_parser("list").set_defaults(func=cmd_project_list)
+    pi = pr_sub.add_parser("ingest", help="extract requirement units from the files")
+    pi.add_argument("project")
+    pi.set_defaults(func=cmd_project_ingest)
+
+    pl = sub.add_parser("plan", help="review, approve, diff and export plans")
+    pl_sub = pl.add_subparsers(dest="plan_cmd", required=True)
+    ps = pl_sub.add_parser("show")
+    ps.add_argument("project")
+    ps.add_argument("--version", type=int)
+    ps.set_defaults(func=cmd_plan_show)
+    pa = pl_sub.add_parser("approve", help="human approval (typed confirmation)")
+    pa.add_argument("project")
+    pa.add_argument("--version", type=int)
+    pa.add_argument("--note")
+    pa.set_defaults(func=cmd_plan_approve)
+    pd = pl_sub.add_parser("diff", help="change request between versions")
+    pd.add_argument("project")
+    pd.add_argument("--old", type=int, help="default: latest approved version")
+    pd.add_argument("--new", type=int, help="default: latest version")
+    pd.set_defaults(func=cmd_plan_diff)
+    pe = pl_sub.add_parser("export", help="client sign-off doc and/or UAT script")
+    pe.add_argument("project")
+    pe.add_argument("what", nargs="+", choices=["signoff", "uat"])
+    pe.add_argument("--version", type=int)
+    pe.set_defaults(func=cmd_plan_export)
+
     sub.add_parser("serve", help="run the MCP server (stdio)").set_defaults(func=cmd_serve)
     return p
 
@@ -216,7 +369,13 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         return args.func(args)
-    except (secrets.MissingSecretError, oauth.OAuthError, LookupError, ValueError) as exc:
+    except (
+        secrets.MissingSecretError,
+        oauth.OAuthError,
+        LookupError,
+        ValueError,
+        FileExistsError,
+    ) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 

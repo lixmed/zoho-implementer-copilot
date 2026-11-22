@@ -126,6 +126,122 @@ def get_users(org: str) -> list[dict]:
     return metadata.list_users_masked(_client(org))
 
 
+# ---------------------------------------------------------------------------
+# Planner tier: reads requirements, writes plan files to the LOCAL workspace only.
+# Nothing here touches Zoho except metadata reads for validation. There is no
+# approve tool on purpose: approval is a human action at the CLI.
+# ---------------------------------------------------------------------------
+
+LOCAL_WRITE = ToolAnnotations(read_only_hint=False, destructive_hint=False, open_world_hint=False)
+
+
+def _project(slug: str):
+    from copilot.projects.workspace import open_project
+
+    return open_project(slug)
+
+
+def _client_factory(project):
+    def factory():
+        return _client(project.info.org) if project.info.org else None
+
+    return factory
+
+
+@_read_tool
+def list_projects() -> list[dict]:
+    """Client projects in the workspace (slug, client, project, linked org)."""
+    from copilot.projects.workspace import list_projects as _list
+
+    return [p.info.model_dump() for p in _list()]
+
+
+@_read_tool
+def get_requirements(project: str) -> list[dict]:
+    """Requirement units for a project. Each has an id (e.g. 'kickoff:3') that plan items
+    MUST cite in `sources`. Contact details are masked."""
+    from copilot.projects.requirements import load_units
+
+    return [u.model_dump(exclude_none=True) for u in load_units(_project(project).requirements_dir)]
+
+
+@_read_tool
+def get_plan_schema() -> dict:
+    """JSON Schema of the plan draft accepted by check_plan / save_plan."""
+    from copilot.planner.schema import PlanDraft
+
+    return PlanDraft.model_json_schema()
+
+
+@_read_tool
+def get_plan(project: str, version: int | None = None) -> dict:
+    """A saved plan version (latest if version is omitted), with computed coverage."""
+    from copilot.planner.store import load_plan
+
+    return load_plan(_project(project), version).model_dump(mode="json")
+
+
+@_read_tool
+def check_plan(project: str, plan: dict) -> dict:
+    """Validate a plan draft WITHOUT saving: schema, traceability, api names vs the org,
+    scopes. Returns errors, warnings and computed coverage. Fix every error."""
+    from copilot.planner import service
+
+    p = _project(project)
+    return service.check(p, plan, _client_factory(p))
+
+
+@server.tool(annotations=LOCAL_WRITE)
+def save_plan(project: str, plan: dict) -> dict:
+    """Validate and save a plan draft as the next version (plan.vN.json + plan.vN.md) in the
+    local workspace. Refuses if there are errors. Does NOT approve or apply anything."""
+    from copilot.planner import service
+
+    p = _project(project)
+    return service.save(p, plan, _client_factory(p))
+
+
+@_read_tool
+def diff_plans(project: str, old_version: int, new_version: int) -> dict:
+    """Change-request diff between two plan versions: items added/removed/changed, effort delta."""
+    from copilot.planner.store import diff_plans as _diff
+    from copilot.planner.store import load_plan
+
+    p = _project(project)
+    return _diff(load_plan(p, old_version), load_plan(p, new_version)).model_dump(mode="json")
+
+
+PLAN_PROMPT = """\
+You are helping a Zoho CRM implementer turn client requirements into an implementation plan.
+
+Project: {project}
+
+Steps:
+1. get_requirements("{project}") and read every unit.
+2. If the project has a linked org: get_modules, then get_fields / get_layouts /
+   get_workflow_rules / get_functions for the relevant modules. Reuse existing fields;
+   never invent api_names for fields you claim already exist.
+3. get_plan_schema(). If a previous plan exists (get_plan), revise it and KEEP the ids of
+   unchanged items, so the change-request diff is meaningful.
+4. Draft the plan:
+   - Every item, question and ticket cites the unit ids it comes from in `sources`.
+   - Every unit must be accounted for: cited, asked about, or listed in out_of_scope with a reason.
+   - Ask a client question instead of guessing when a requirement is ambiguous.
+   - Connections: minimum scopes, each with a reason.
+   - Things with no API (validation rules, buttons, blueprints, related lists, new layouts) are
+     UiOnly items with steps_hint.
+   - Custom development beyond configuration becomes a developer ticket.
+5. check_plan until there are no errors, then save_plan.
+6. Tell the human where plan.md is and that they must approve it themselves with
+   `copilot plan approve`. You cannot approve plans.
+"""
+
+
+@server.prompt(name="plan_project", description="Draft or revise the implementation plan")
+def plan_project(project: str) -> str:
+    return PLAN_PROMPT.format(project=project)
+
+
 def run() -> None:
     logging.basicConfig(level=logging.INFO)  # basicConfig logs to stderr; stdout belongs to MCP
     server.run("stdio")
