@@ -7,6 +7,17 @@ uv run pytest
 - **Unit tests:** OAuth parsing, the DC allowlist, the token manager, the read client (401 refresh, 429, 204, caching), the registry and the keychain.
 - **End-to-end against a fake Zoho** (`tests/fake_zoho.py` + `tests/test_e2e.py`): `copilot connect` starts the real localhost callback server, a simulated browser redirect hits it, tokens land in the (in-memory) keychain, `copilot snapshot` writes JSON, and the real MCP server answers tool calls.
   It also covers the attacks: tampered `state`, a foreign `accounts-server`, and a production token when you declared developer.
+- **The full story** (`tests/test_story.py`) is one test that walks a whole engagement:
+  1. Connect the dev org (real PKCE and callback server), snapshot it, check users are masked.
+  2. Create a project. The client sends a .docx (with a table) and an email.
+  3. The agent drafts a plan over MCP. `check_plan` catches a field that doesn't exist, the agent fixes it, and saves v1.
+  4. A wrong-slug approval is refused, then the human approves at the CLI.
+  5. The sign-off doc and UAT script are exported.
+  6. The client emails a change request (new feature, one withdrawn). Old unit ids don't move. The agent saves v2.
+  7. `plan diff` produces the change request against the approved version, with the effort delta.
+  8. The project ends: `orgs remove --revoke`, and the keychain and registry are empty.
+
+  Run just the story with `uv run pytest tests/test_story.py -v`.
 - The fake responses follow the v8 docs and are **not recorded from a real org yet**. Level B fixes that.
 
 ## Level B: a free real Zoho org

@@ -41,7 +41,7 @@ select = ["E", "F", "I", "B", "UP", "S", "SIM"]
 ignore = ["S101"]  # assert is fine in tests
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S105", "S106"]  # fake secrets in tests
+"tests/**" = ["S105", "S106", "E501"]  # fake secrets and long fixture lines in tests
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

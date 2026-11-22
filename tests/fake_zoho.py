@@ -203,6 +203,18 @@ PROFILES = {
 }
 
 
+USERS = {
+    "users": [
+        {"id": "u1", "full_name": "Jane Fake", "email": "jane@demo-realty.test",
+         "phone": "+1 555 0101", "status": "active", "confirm": True,
+         "role": {"id": "r1", "name": "CEO"}, "profile": {"id": "pr1", "name": "Administrator"}},
+        {"id": "u2", "full_name": "Omar Fake", "email": "omar@demo-realty.test",
+         "status": "active", "role": {"id": "r2", "name": "Agent"},
+         "profile": {"id": "pr2", "name": "Agent"}},
+    ]
+}  # fmt: skip
+
+
 def token_body(api_domain: str = DEV_API, refresh: bool = True) -> dict:
     body = {
         "access_token": "fake-access",
@@ -231,3 +243,4 @@ def mount(router: respx.Router, api: str = DEV_API) -> None:
     router.get(f"{base}/settings/functions").respond(200, json=FUNCTIONS)
     router.get(f"{base}/settings/roles").respond(200, json=ROLES)
     router.get(f"{base}/settings/profiles").respond(200, json=PROFILES)
+    router.get(f"{base}/users").respond(200, json=USERS)

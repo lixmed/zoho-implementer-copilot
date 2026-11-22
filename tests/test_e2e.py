@@ -23,7 +23,7 @@ from copilot.auth import oauth, secrets
 from copilot.mcp_server import server as mcp_mod
 from copilot.orgs.registry import OrgRegistry
 
-# RFC 7636 vector, so these tests don't depend on the PKCE exercise being done yet
+# Fixed RFC 7636 vector so the fake browser can assert the exact challenge it receives
 VERIFIER = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 CHALLENGE = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
 
