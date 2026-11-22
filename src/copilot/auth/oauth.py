@@ -21,7 +21,7 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 import httpx
 
 from copilot.auth import pkce
-from copilot.auth.dc import DEFAULT_AUTH_START, dc_for_accounts_server
+from copilot.auth.dc import DEFAULT_AUTH_START, UnknownDataCentreError, dc_for_accounts_server
 
 # Level 1 (Planner) scopes: metadata only. No ZohoCRM.modules.* => no customer records.
 LEVEL1_SCOPES: tuple[str, ...] = (
@@ -85,7 +85,10 @@ def parse_callback(query: str, expected_state: str) -> CallbackResult:
     if not code:
         raise OAuthError("callback had no authorization code")
     accounts_server = q.get("accounts-server", DEFAULT_AUTH_START)
-    dc_for_accounts_server(accounts_server)  # raises if not a known Zoho DC
+    try:
+        dc_for_accounts_server(accounts_server)
+    except UnknownDataCentreError as exc:
+        raise OAuthError(str(exc)) from None
     return CallbackResult(code=code, location=q.get("location"), accounts_server=accounts_server)
 
 
