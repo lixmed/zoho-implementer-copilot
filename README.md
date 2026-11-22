@@ -2,7 +2,10 @@
 
 A local AI copilot for Zoho partners. It turns client requirements into Zoho CRM implementations, and a human approves every step.
 
-> Status: **Phase 1**. OAuth for one org, keychain token storage, and read-only metadata tools over MCP.
+> Status: **Phase 2**. OAuth and read-only metadata tools over MCP, plus a **Planner** that turns
+> requirements (.md, .txt, .eml, .docx, .pdf) into a versioned plan. Every plan item is traced back
+> to the client's own sentence, and change requests are diffed against the approved version.
+> See [docs/planner.md](docs/planner.md).
 
 ## What it does (so far)
 - Connects a Zoho CRM org through Zoho's official OAuth (server-based client, PKCE, localhost redirect). Supports every Zoho data centre.

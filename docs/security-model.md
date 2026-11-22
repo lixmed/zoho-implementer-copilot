@@ -18,6 +18,15 @@ Client refresh tokens, the Zoho client secret, client org metadata, and (never i
 | Wrong environment | The environment is detected from `api_domain`. If it doesn't match what the user declared, the token is revoked and nothing is saved. Production connections are blocked until Phase 7. |
 | Client wants out | `copilot orgs remove <slug> --revoke` revokes the token at Zoho. The client admin can also revoke it from their Zoho account at any time. |
 
+## Phase 2 additions
+| Threat | Control |
+|---|---|
+| Client documents leaking via git | Project workspaces live in a user-chosen folder outside the repo. `snapshots/` and `handoff/` are gitignored. |
+| Contact details in requirements reaching the LLM | Emails and phone numbers are masked when units are extracted. Email signatures and quoted replies are dropped. |
+| Agent approving its own plan | There is no approve tool over MCP. Approval is a CLI action with a typed confirmation, logged with approver, time and SHA-256. |
+| Approved plan edited afterwards | The hash no longer matches, so the plan counts as not approved. |
+| Planner writing to Zoho | The planner tier writes only local files (`open_world_hint=False`). Zoho access stays read-only. |
+
 ## Planned
 - Phase 4: write tier with approval gates, a SQLite audit log (who, what, when, org, before/after), and snapshots and rollback.
 - Phase 7: production profile with a typed confirmation, and API credit budgets.

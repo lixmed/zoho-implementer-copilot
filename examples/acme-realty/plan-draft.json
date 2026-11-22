@@ -1,0 +1,158 @@
+{
+  "summary": "Capture lead temperature, alert agents on hot leads, show properties on deals.",
+  "items": [
+    {
+      "kind": "picklist_change",
+      "id": "P-001",
+      "title": "Budget ranges",
+      "rationale": "Agents qualify leads by budget",
+      "sources": [
+        "kickoff:2"
+      ],
+      "estimate_minutes": 10,
+      "module": "Leads",
+      "field_api_name": "Budget_Range",
+      "add_values": [
+        "200k-500k",
+        ">500k"
+      ]
+    },
+    {
+      "kind": "layout",
+      "id": "P-002",
+      "title": "Show Property on deals",
+      "rationale": "Agents see the property",
+      "sources": [
+        "kickoff:3"
+      ],
+      "estimate_minutes": 15,
+      "module": "Deals",
+      "layout": "Standard",
+      "create_new": false,
+      "changes": [
+        "add Property to Deal Information"
+      ],
+      "acceptance_test": "Open a deal and see the Property field"
+    },
+    {
+      "kind": "workflow",
+      "id": "P-003",
+      "title": "Hot lead email",
+      "rationale": "Agents react fast",
+      "sources": [
+        "kickoff:4"
+      ],
+      "depends_on": [
+        "P-004"
+      ],
+      "estimate_minutes": 20,
+      "module": "Leads",
+      "trigger": "create_or_edit",
+      "criteria": "Lead_Temperature is Hot",
+      "criteria_fields": [
+        "Leads.Lead_Temperature"
+      ],
+      "actions": [
+        {
+          "type": "email_notification",
+          "details": "email lead owner"
+        }
+      ]
+    },
+    {
+      "kind": "field",
+      "id": "P-004",
+      "title": "Lead temperature",
+      "rationale": "Mark hot leads",
+      "sources": [
+        "kickoff:4"
+      ],
+      "estimate_minutes": 10,
+      "module": "Leads",
+      "field_label": "Lead Temperature",
+      "api_name": "Lead_Temperature",
+      "data_type": "picklist",
+      "picklist_values": [
+        "Hot",
+        "Warm",
+        "Cold"
+      ]
+    },
+    {
+      "kind": "function",
+      "id": "P-005",
+      "title": "Post hot leads to Slack",
+      "rationale": "Team visibility",
+      "sources": [
+        "kickoff:4"
+      ],
+      "estimate_minutes": 45,
+      "name": "notify_slack",
+      "category": "automation",
+      "purpose": "post a message",
+      "uses_fields": [
+        "Leads.Lead_Temperature",
+        "Leads.Last_Name"
+      ],
+      "connections": [
+        "slack_conn"
+      ]
+    },
+    {
+      "kind": "connection",
+      "id": "P-006",
+      "title": "Slack connection",
+      "rationale": "needed by P-005",
+      "sources": [
+        "kickoff:4"
+      ],
+      "estimate_minutes": 10,
+      "service": "Slack",
+      "connection_name": "Slack",
+      "link_name": "slack_conn",
+      "scopes": [
+        {
+          "scope": "chat:write",
+          "reason": "post the hot-lead message"
+        }
+      ]
+    }
+  ],
+  "questions": [
+    {
+      "id": "Q-001",
+      "question": "Which budget ranges do you use?",
+      "why_it_matters": "Defines the picklist",
+      "blocks": [
+        "P-001"
+      ],
+      "sources": [
+        "kickoff:2"
+      ]
+    }
+  ],
+  "tickets": [
+    {
+      "id": "T-001",
+      "title": "Property sync from listing site",
+      "description": "nightly import",
+      "acceptance_criteria": [
+        "new listings appear within 24h"
+      ],
+      "estimate_hours": 6,
+      "sources": [
+        "kickoff:3"
+      ]
+    }
+  ],
+  "out_of_scope": [
+    {
+      "unit_id": "kickoff:1",
+      "reason": "Lead_Source already has Website and Referral"
+    },
+    {
+      "unit_id": "kickoff:5",
+      "reason": "contact details, not a requirement"
+    }
+  ]
+}

@@ -20,6 +20,26 @@ Zoho's MCP executes changes. My tool delivers projects. The headline feature is 
 **Q: How does the tool handle Zoho's data centres?**
 It never hardcodes the API URL. Authorization starts at accounts.zoho.com. The callback says which accounts server the user belongs to, and the token response returns `api_domain`. Both are stored per org profile.
 
+## Phase 2: Planner with traceability
+
+**Q: How do you stop the LLM from hallucinating scope or quietly dropping requirements?**
+I don't let it grade itself. Every requirement sentence gets an id, and every plan item must cite the ids it comes from. The *server* computes coverage from those citations. If any sentence is neither cited, asked about, nor explicitly marked out of scope with a reason, the plan can't be saved. Items that cite nothing fail schema validation, so invented scope has nowhere to hide.
+
+**Q: How do you stop it inventing field names?**
+Validation checks every `Module.Field` reference against the org's live metadata plus the fields the plan itself creates. A workflow on a field that doesn't exist is an error, and the agent sees it and has to fix it before saving.
+
+**Q: Who decides what can be automated?**
+Not the LLM. Each item's delivery mode (API / handoff / decision) is derived from the Phase 0 API research table in code. If Zoho has no API for validation rules, the plan can't claim one will be created automatically.
+
+**Q: Why can't the agent approve its own plan?**
+There's no approve tool in the MCP server. Approval is a CLI command where a human types the project slug. It records who, when and a SHA-256 of the plan file, so editing an approved plan silently voids the approval. That's a classic separation of duties.
+
+**Q: How do change requests work?**
+Plans are versioned, and the agent keeps item ids stable when revising. A diff against the last *approved* version shows exactly what was added, removed and changed, and the effort delta, which becomes a client-facing change request. Scope creep becomes visible and billable.
+
+**Q: Why let Claude Code do the reasoning instead of calling the API from your server?**
+Cost and time to value: it works today with no API key. The important part, the rules, lives in the server, so it doesn't matter which agent drafts. For repeatable evals I'll add my own API loop later; it will hit the same validation.
+
 ## Phase 1: OAuth, keychain, read-only MCP tools
 
 **Q: Why MCP?**
