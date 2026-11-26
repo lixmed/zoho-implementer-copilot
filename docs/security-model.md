@@ -27,6 +27,18 @@ Client refresh tokens, the Zoho client secret, client org metadata, and (never i
 | Approved plan edited afterwards | The hash no longer matches, so the plan counts as not approved. |
 | Planner writing to Zoho | The planner tier writes only local files (`open_world_hint=False`). Zoho access stays read-only. |
 
+## Phase 3 additions (first writes to Zoho)
+| Threat | Control |
+|---|---|
+| Agent writing to Zoho on its own | No push or attach tool over MCP. `copilot deluge push` is a CLI action with a typed function name. |
+| Writing unapproved code | Push requires an approved plan, unchanged since approval (SHA-256), containing that function. |
+| Writing to production | The write client refuses production orgs. Push only targets developer or sandbox. |
+| Broad write permissions | Write scopes are opt-in (`--allow-writes`) and limited to `ZohoCRM.settings.functions.CREATE/UPDATE`. |
+| Dangerous code shipped | Static checks block hard-coded secrets, manual auth headers, undeclared connections and unknown modules or fields. |
+| Code running on records unexpectedly | Functions are saved but never attached to workflows. Attaching is a separate approved handoff step. |
+| No trace of changes | Append-only SQLite audit log (UPDATE and DELETE blocked by triggers): actor, time, org, environment, plan version, before/after, result. |
+| Doc lookups leaking project details | Search ranks locally, so queries never leave the machine. Fetches are allowlisted to zoho.com doc paths, redirects included. |
+
 ## Planned
-- Phase 4: write tier with approval gates, a SQLite audit log (who, what, when, org, before/after), and snapshots and rollback.
+- Phase 4: generalize the write tier (fields, layouts, workflows) with snapshots, diff and rollback, reusing the Phase 3 audit log and approval gates.
 - Phase 7: production profile with a typed confirmation, and API credit budgets.

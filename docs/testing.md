@@ -13,9 +13,10 @@ uv run pytest
   3. The agent drafts a plan over MCP. `check_plan` catches a field that doesn't exist, the agent fixes it, and saves v1.
   4. A wrong-slug approval is refused, then the human approves at the CLI.
   5. The sign-off doc and UAT script are exported.
-  6. The client emails a change request (new feature, one withdrawn). Old unit ids don't move. The agent saves v2.
-  7. `plan diff` produces the change request against the approved version, with the effort delta.
-  8. The project ends: `orgs remove --revoke`, and the keychain and registry are empty.
+  6. Deluge: the agent gets the function brief. Bad code (hard-coded token, no connection) is refused, and good code is saved with tests. A wrong typed name means nothing is sent. Zoho's compiler rejects the first push, the error is read back, and the second push succeeds. Only the functions endpoint is written to (no workflow calls), and the audit log has both attempts.
+  7. The client emails a change request (new feature, one withdrawn). Old unit ids don't move. The agent saves v2.
+  8. `plan diff` produces the change request against the approved version, with the effort delta.
+  9. The project ends: `orgs remove --revoke`, and the keychain and registry are empty.
 
   Run just the story with `uv run pytest tests/test_story.py -v`.
 - The fake responses follow the v8 docs and are **not recorded from a real org yet**. Level B fixes that.

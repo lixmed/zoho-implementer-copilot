@@ -20,6 +20,23 @@ Zoho's MCP executes changes. My tool delivers projects. The headline feature is 
 **Q: How does the tool handle Zoho's data centres?**
 It never hardcodes the API URL. Authorization starts at accounts.zoho.com. The callback says which accounts server the user belongs to, and the token response returns `api_domain`. Both are stored per org profile.
 
+## Phase 3: Deluge generation
+
+**Q: How do you make generated Deluge use real functions and real field names?**
+Two sources of truth, both outside the model. First, a function brief built from the org's live metadata plus the fields the plan creates. The model gets the exact api_names and nothing else. Second, live lookups in Zoho's official docs for every task it uses, scoped to the app, because Deluge differs between CRM, Books and Creator. Then static checks verify the code against those same names before anything leaves the laptop.
+
+**Q: Why search docs live instead of building a vector database?**
+The user's call, and it fits: Deluge docs change and differ per app, and a stale index produces confidently wrong code. I didn't want a search API key or to send queries out, so the tool downloads Zoho's public per-app task index and ranks it locally. The query never leaves the machine, only public doc pages are fetched, and fetches are restricted to an allowlist of zoho.com paths (redirects included).
+
+**Q: What do your static checks catch?**
+Wrong declaration or return type for the category, unbalanced brackets, hard-coded tokens and keys, `invokeurl` without a connection or with an undeclared one, modules and fields that don't exist, hard-coded record ids (they break when you move from sandbox to production), missing null checks, and missing logging. Errors block saving and pushing. Zoho's compiler is still the final judge, and its line and position come back to the agent.
+
+**Q: The tool writes to Zoho now. What stops it doing damage?**
+Six gates: there's no push tool in MCP, so a human runs the CLI. The plan must be approved and unchanged since approval (hash check). The org must be developer or sandbox. Write scopes are opt-in and limited to creating and updating functions. Static checks must be clean. And the human types the function name. The write client is a separate class that refuses production, and every call lands in an append-only SQLite audit log with before and after. The function is saved but never attached to a workflow, so it can't run on records until someone approves that separately.
+
+**Q: Why not store the code in the audit log?**
+The code is already versioned in the project's handoff folder. The audit log records what happened (who, when, which org, plan version, code length, Zoho's response). Keeping it small and free of payloads makes it easy to share with a client's admin.
+
 ## Phase 2: Planner with traceability
 
 **Q: How do you stop the LLM from hallucinating scope or quietly dropping requirements?**

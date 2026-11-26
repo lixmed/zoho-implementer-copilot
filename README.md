@@ -6,6 +6,11 @@ A local AI copilot for Zoho partners. It turns client requirements into Zoho CRM
 > requirements (.md, .txt, .eml, .docx, .pdf) into a versioned plan. Every plan item is traced back
 > to the client's own sentence, and change requests are diffed against the approved version.
 > See [docs/planner.md](docs/planner.md).
+>
+> **Phase 3:** Deluge functions are written against the org's real field names, with live
+> lookups in Zoho's official docs per app. Static checks catch secrets, missing connections and
+> unknown fields. After a typed human confirmation, a function is saved in the dev or sandbox org
+> (never attached to a workflow) and every write is audited. See [docs/deluge.md](docs/deluge.md).
 
 ## What it does (so far)
 - Connects a Zoho CRM org through Zoho's official OAuth (server-based client, PKCE, localhost redirect). Supports every Zoho data centre.
