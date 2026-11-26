@@ -56,9 +56,13 @@ def cmd_connect(args: argparse.Namespace) -> int:
     redirect = oauth.redirect_uri(args.port)
     state = oauth.new_state()
     verifier, challenge = oauth.new_pkce_pair()
-    url = oauth.build_authorize_url(
-        creds.client_id, redirect, oauth.LEVEL1_SCOPES, state, challenge
-    )
+    scopes = oauth.LEVEL1_SCOPES
+    if args.allow_writes:
+        from copilot.zoho.write import FUNCTION_WRITE_SCOPES
+
+        scopes = scopes + FUNCTION_WRITE_SCOPES
+        print("Requesting write scopes for Deluge functions (create/update only).")
+    url = oauth.build_authorize_url(creds.client_id, redirect, scopes, state, challenge)
 
     print(f"Redirect URI (must be registered in api-console.zoho.com): {redirect}")
     print("Opening Zoho consent page. If it doesn't open, paste this URL into a browser:\n")
@@ -114,7 +118,7 @@ def cmd_connect(args: argparse.Namespace) -> int:
         dc=dc.key,
         accounts_server=callback.accounts_server,
         api_domain=tok.api_domain,
-        scopes=(tok.scope.split() if tok.scope else list(oauth.LEVEL1_SCOPES)),
+        scopes=(tok.scope.replace(",", " ").split() if tok.scope else list(scopes)),
         zoho_org_id=str(org_info.get("id")) if org_info.get("id") else None,
         edition=org_info.get("type"),
     )
@@ -284,6 +288,57 @@ def cmd_plan_export(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_deluge_check(args: argparse.Namespace) -> int:
+    from copilot.deluge import handoff
+    from copilot.deluge.checks import check_deluge
+    from copilot.planner.service import org_metadata
+    from copilot.projects.workspace import open_project
+
+    p = open_project(args.project)
+    plan = handoff.plan_for_functions(p)
+    fn = handoff.find_function(plan, args.name)
+    reader = open_read_client(p.info.org)[1] if p.info.org else None
+    catalog = handoff.field_catalog(plan, org_metadata(reader))
+    issues = check_deluge(handoff.load_function_code(p, args.name), fn, catalog)
+    for i in issues:
+        print(f"{i.level:8} {i.ref}: {i.message}")
+    errors = sum(i.level == "error" for i in issues)
+    print(f"{errors} error(s), {len(issues) - errors} warning(s)")
+    return 1 if errors else 0
+
+
+def cmd_deluge_push(args: argparse.Namespace) -> int:
+    from copilot.deluge.push import PushRefusedError, push_function
+    from copilot.projects.workspace import open_project
+
+    def confirm(prompt: str) -> bool:
+        return input(prompt).strip().lstrip("﻿") == args.name
+
+    try:
+        out = push_function(open_project(args.project), args.name, confirm)
+    except PushRefusedError as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 2
+    if not out["pushed"]:
+        print(f"Not pushed: {out.get('reason') or out.get('code')}: {out.get('message') or ''}")
+        if out.get("details"):
+            print(json.dumps(out["details"], indent=2))
+        return 1
+    print(f"{out['action'].title()}d '{args.name}' in {out['org']} (plan v{out['plan_version']}).")
+    print("Not attached to any workflow: attach it after approval, using the handoff checklist.")
+    return 0
+
+
+def cmd_audit(args: argparse.Namespace) -> int:
+    from copilot.audit.log import AuditLog
+
+    for e in AuditLog().entries(org=args.org, limit=args.limit):
+        print(
+            f"{e['ts'][:19]} {e['actor']:10} {e['org']:16} {e['action']:16} {e['target']:24} {e['result']}"
+        )
+    return 0
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     from copilot.mcp_server.server import run
 
@@ -306,6 +361,11 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--slug", help="short id (default: derived from name)")
     c.add_argument("--env", required=True, choices=["developer", "sandbox", "production"])
     c.add_argument("--port", type=int, default=oauth.DEFAULT_PORT)
+    c.add_argument(
+        "--allow-writes",
+        action="store_true",
+        help="also request scopes to create/update Deluge functions (developer/sandbox only)",
+    )
     c.set_defaults(func=cmd_connect)
 
     orgs = sub.add_parser("orgs", help="list or remove connected orgs")
@@ -360,6 +420,22 @@ def build_parser() -> argparse.ArgumentParser:
     pe.add_argument("what", nargs="+", choices=["signoff", "uat"])
     pe.add_argument("--version", type=int)
     pe.set_defaults(func=cmd_plan_export)
+
+    dl = sub.add_parser("deluge", help="check and push Deluge functions")
+    dl_sub = dl.add_subparsers(dest="deluge_cmd", required=True)
+    dc = dl_sub.add_parser("check", help="run static checks on a saved function")
+    dc.add_argument("project")
+    dc.add_argument("name")
+    dc.set_defaults(func=cmd_deluge_check)
+    dp = dl_sub.add_parser("push", help="save a function in the dev/sandbox org (typed confirm)")
+    dp.add_argument("project")
+    dp.add_argument("name")
+    dp.set_defaults(func=cmd_deluge_push)
+
+    au = sub.add_parser("audit", help="show the audit log of changes made in Zoho")
+    au.add_argument("--org")
+    au.add_argument("--limit", type=int, default=50)
+    au.set_defaults(func=cmd_audit)
 
     sub.add_parser("serve", help="run the MCP server (stdio)").set_defaults(func=cmd_serve)
     return p

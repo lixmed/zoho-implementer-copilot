@@ -3,7 +3,7 @@ import asyncio
 from copilot.mcp_server.server import server
 
 # Tools that may write, and only to the LOCAL workspace (never to Zoho)
-LOCAL_WRITE_TOOLS = {"save_plan"}
+LOCAL_WRITE_TOOLS = {"save_plan", "save_deluge"}
 
 
 def _tools():
@@ -24,5 +24,6 @@ def test_tools_are_read_only_except_local_plan_saving():
 
 def test_no_zoho_write_delete_or_approve_tools():
     names = {t.name for t in _tools()}
-    assert not any(n.startswith(("create", "update", "delete", "apply", "approve")) for n in names)
+    forbidden = ("create", "update", "delete", "apply", "approve", "push", "attach", "deploy")
+    assert not any(n.startswith(forbidden) for n in names)
     assert {"list_orgs", "get_fields", "get_requirements", "check_plan", "save_plan"} <= names

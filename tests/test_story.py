@@ -21,9 +21,12 @@ import docx
 import fake_zoho
 import keyring
 import respx
+from deluge_samples import BAD as BAD_DELUGE
+from deluge_samples import GOOD as GOOD_DELUGE
 from test_e2e import free_port
 
 from copilot import cli
+from copilot.audit.log import AuditLog
 from copilot.auth import secrets
 from copilot.mcp_server import server as mcp_mod
 from copilot.orgs.registry import OrgRegistry
@@ -32,8 +35,8 @@ SLUG = "acme-realty/onboarding"
 ORG = "acme-dev"
 
 
-def call(name, **args):
-    r = asyncio.run(mcp_mod.server.call_tool(name, args))
+def call(tool, /, **args):
+    r = asyncio.run(mcp_mod.server.call_tool(tool, args))
     assert not r.is_error, r
     if r.structured_content is not None:
         sc = r.structured_content
@@ -102,7 +105,7 @@ def test_acme_realty_full_story(tmp_path, monkeypatch, capsys):
     secrets.save_client(secrets.ClientCredentials("cid", {"us": "client-secret"}))
     monkeypatch.setattr(cli.webbrowser, "open", fake_browser_approves)
     assert cli.main(["connect", "--name", "Acme Dev", "--slug", ORG, "--env", "developer",
-                     "--port", str(free_port())]) == 0  # fmt: skip
+                     "--port", str(free_port()), "--allow-writes"]) == 0  # fmt: skip
     sent = token.calls[0].request.content.decode()
     assert "code_verifier=" in sent and "client-secret" in sent
 
@@ -217,6 +220,59 @@ def test_acme_realty_full_story(tmp_path, monkeypatch, capsys):
     assert "To confirm: Should the deal show the asking price" in signoff
     assert "- [ ] P-003 Hot lead task: A Hot lead gets a call task due in 1 hour" in uat
     assert "P-005 Post hot leads to Slack: (no acceptance test, ask the implementer)" in uat
+
+    # --- 7b. Deluge: the agent writes post_hot_lead, the human pushes it -----------------
+    brief = call("get_function_brief", project=SLUG, name="post_hot_lead")
+    assert "Lead_Temperature" in brief["fields"]["Leads"]  # planned field is known
+    assert brief["connections"][0]["link_name"] == "slack_conn"
+
+    bad = call("check_deluge", project=SLUG, name="post_hot_lead", code=BAD_DELUGE)
+    assert bad["ok"] is False
+    refused = call("save_deluge", project=SLUG, name="post_hot_lead", code=BAD_DELUGE, tests=[])
+    assert refused["saved"] is False
+
+    tests = [
+        {"name": "hot lead posts", "input": {"Lead_Temperature": "Hot", "Last_Name": "Fake"},
+         "expected": {"status": "ok"}},
+        {"name": "missing temperature is skipped", "input": {"Last_Name": "Fake"}, "expected": {}},
+    ]  # fmt: skip
+    saved_fn = call(
+        "save_deluge", project=SLUG, name="post_hot_lead", code=GOOD_DELUGE, tests=tests
+    )
+    assert saved_fn["saved"].endswith("post_hot_lead.dg")
+    handoff_dir = req_dir.parent / "handoff"
+    dg = (handoff_dir / "functions" / "post_hot_lead.dg").read_text(encoding="utf-8")
+    assert "Setup > Developer Hub > Functions" in dg and "NOT attached automatically" in dg
+    assert "chat:write" in (handoff_dir / "connections.md").read_text(encoding="utf-8")
+
+    # Zoho's compiler rejects the first push, accepts the second
+    create = respx.post(f"{fake_zoho.DEV_API}/crm/v8/settings/functions")
+    create.side_effect = [
+        respx.MockResponse(400, json={"functions": [{"code": "COMPILATION_ERROR", "status": "error",
+            "message": "function has compilation errors",
+            "details": {"line": 21, "position": 3, "error": "Improper statement"}}]}),
+        respx.MockResponse(201, json={"functions": [{"code": "SUCCESS", "status": "success",
+            "message": "function created successfully", "details": {"id": "777001"}}]}),
+    ]  # fmt: skip
+    monkeypatch.setattr(builtins, "input", lambda prompt="": "nope")
+    assert cli.main(["deluge", "push", SLUG, "post_hot_lead"]) == 1  # wrong name typed
+    assert not create.called
+    monkeypatch.setattr(builtins, "input", lambda prompt="": "post_hot_lead")
+    assert cli.main(["deluge", "push", SLUG, "post_hot_lead"]) == 1
+    status = call("get_push_result", project=SLUG, name="post_hot_lead")
+    assert status["code"] == "COMPILATION_ERROR" and status["details"]["line"] == 21
+    assert cli.main(["deluge", "push", SLUG, "post_hot_lead"]) == 0
+    sent_meta = create.calls[-1].request.content.decode()
+    assert '"category": "Automation"' in sent_meta and '"runtime": "Deluge 1.0"' in sent_meta
+    # only the function endpoint was written to: nothing touched workflow rules
+    writes = [c for c in respx.calls if c.request.method in ("POST", "PUT", "PATCH", "DELETE")
+              and "/crm/" in str(c.request.url)]  # fmt: skip
+    assert {str(c.request.url) for c in writes} == {
+        f"{fake_zoho.DEV_API}/crm/v8/settings/functions"
+    }
+    audit = AuditLog().entries(org=ORG)
+    assert [e["result"] for e in audit] == ["success", "error:COMPILATION_ERROR"]
+    assert all("slack.com" not in (e["after_json"] or "") for e in audit)  # code not stored
 
     # --- 8. change request: viewing feedback, and Slack is dropped -----------------------
     write_email(

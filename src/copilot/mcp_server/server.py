@@ -211,6 +211,98 @@ def diff_plans(project: str, old_version: int, new_version: int) -> dict:
     return _diff(load_plan(p, old_version), load_plan(p, new_version)).model_dump(mode="json")
 
 
+# ---------------------------------------------------------------------------
+# Deluge tier: docs lookup (public zoho.com docs only), checks, local saving.
+# There is NO push tool: saving a function in Zoho is a human CLI action
+# (`copilot deluge push`), and attaching it to a workflow is never automated.
+# ---------------------------------------------------------------------------
+
+DOCS_READ = ToolAnnotations(read_only_hint=True, destructive_hint=False, open_world_hint=True)
+
+
+@server.tool(annotations=DOCS_READ)
+def search_deluge_docs(query: str, app: str = "crm") -> list[dict]:
+    """Search Zoho's official Deluge docs for one app (crm, books, creator, desk, people,
+    projects, ...). Ranking happens locally; only public zoho.com doc pages are fetched."""
+    from copilot.deluge import docs
+
+    return [h.__dict__ for h in docs.search(query, app)]
+
+
+@server.tool(annotations=DOCS_READ)
+def read_deluge_doc(url: str) -> dict:
+    """Read one official Zoho docs page (www.zoho.com/deluge/help/... or /<app>/developer|help/...)
+    as text with code samples. Use it for exact task syntax before writing code."""
+    from copilot.deluge import docs
+
+    return docs.read_doc(url)
+
+
+def _function_ctx(project: str):
+    from copilot.planner.service import org_metadata
+
+    p = _project(project)
+    return p, org_metadata(_client_factory(p)())
+
+
+@_read_tool
+def get_function_brief(project: str, name: str) -> dict:
+    """Everything needed to write one planned Deluge function: the plan item, exact field
+    api_names of the modules it uses, its connections, its triggers, and house conventions."""
+    from copilot.deluge import handoff
+
+    p, org = _function_ctx(project)
+    return handoff.brief(p, name, org)
+
+
+@_read_tool
+def check_deluge(project: str, name: str, code: str) -> dict:
+    """Static checks: declaration, brackets, secrets, connections, module/field api names vs
+    the org, null checks, logging. Fix every error before saving."""
+    from copilot.deluge import handoff
+    from copilot.deluge.checks import check_deluge as _check
+
+    p, org = _function_ctx(project)
+    plan = handoff.plan_for_functions(p)
+    fn = handoff.find_function(plan, name)
+    issues = _check(handoff.strip_header(code), fn, handoff.field_catalog(plan, org))
+    return {
+        "ok": not any(i.level == "error" for i in issues),
+        "errors": [i.model_dump() for i in issues if i.level == "error"],
+        "warnings": [i.model_dump() for i in issues if i.level == "warning"],
+    }
+
+
+@server.tool(annotations=LOCAL_WRITE)
+def save_deluge(project: str, name: str, code: str, tests: list[dict]) -> dict:
+    """Save a checked function to the project's handoff folder (<name>.dg with a placement
+    header, <name>.tests.json, connections.md). Refuses if checks have errors. Does not push."""
+    from copilot.deluge import handoff
+    from copilot.deluge.checks import check_deluge as _check
+
+    p, org = _function_ctx(project)
+    plan = handoff.plan_for_functions(p)
+    fn = handoff.find_function(plan, name)
+    issues = _check(handoff.strip_header(code), fn, handoff.field_catalog(plan, org))
+    errors = [i.model_dump() for i in issues if i.level == "error"]
+    if errors:
+        return {"saved": False, "errors": errors}
+    out = handoff.save_function(p, name, code, [handoff.TestCase(**t) for t in tests])
+    return {
+        **out,
+        "warnings": [i.model_dump() for i in issues if i.level == "warning"],
+        "next_step": f"Human pushes it to the dev org with: copilot deluge push {p.slug} {name}",
+    }
+
+
+@_read_tool
+def get_push_result(project: str, name: str) -> dict:
+    """Result of the last push of a function (success, or Zoho's compiler error to fix)."""
+    from copilot.deluge import handoff
+
+    return handoff.last_push(_project(project), name) or {"pushed": None, "message": "never pushed"}
+
+
 PLAN_PROMPT = """\
 You are helping a Zoho CRM implementer turn client requirements into an implementation plan.
 
@@ -240,6 +332,28 @@ Steps:
 @server.prompt(name="plan_project", description="Draft or revise the implementation plan")
 def plan_project(project: str) -> str:
     return PLAN_PROMPT.format(project=project)
+
+
+DELUGE_PROMPT = """\
+Write the Deluge function `{name}` for project {project}.
+
+1. get_function_brief("{project}", "{name}"): use ONLY the field api_names it lists.
+2. For every Deluge task you use (zoho.crm.*, invokeurl, map/list functions), look up the exact
+   syntax: search_deluge_docs("<task>", "crm") then read_deluge_doc(url). Don't rely on memory.
+3. Follow the conventions in the brief (declaration, null checks, info logs, result map,
+   connections by link name, no secrets or hard-coded ids/emails).
+4. check_deluge until there are no errors, then save_deluge with 2-4 test cases
+   (input record values -> expected outcome), including one null/missing-value case.
+5. Tell the human to push it with `copilot deluge push`. You cannot push, and the function
+   must NOT be attached to any workflow until they approve that separately.
+6. After a push, get_push_result: if Zoho reports a compilation error, fix the code at the
+   reported line, check, save again, and ask the human to push again.
+"""
+
+
+@server.prompt(name="write_deluge", description="Write, check and save one planned Deluge function")
+def write_deluge(project: str, name: str) -> str:
+    return DELUGE_PROMPT.format(project=project, name=name)
 
 
 def run() -> None:
