@@ -251,7 +251,8 @@ Free CRM org on a 15-day Enterprise trial, US DC.
 | `X-API-CREDITS-REMAINING` header | Not sent at low usage (as documented: only from 50% of the daily limit) |
 | Fields without a formula | Return `"formula": {}` |
 | **`POST /settings/functions` (create function)** | ❌ `INVALID_REQUEST` ("verify method name, parameter and parameter values") for both inline `_code` and a `.ds` file part, with a request matching the doc sample. `GET` on the same path works. Likely not enabled for this edition or rollout. **The paste-from-handoff path is the reliable route; API push is best-effort.** |
-| Deluge declaration for automation functions | ❓ Still unverified (create is unavailable on this org) |
+| Deluge declaration for automation functions | Doc rule: `<name in lowercase>` + `<category in lowercase, spaces → underscores>`, e.g. `void automation.my_fn(...)`, `related_list`, `validation_rule`. Not yet confirmed by a real push. |
+| Why create failed | The free tier has no custom functions (per the user). The doc also says *"Initial function creation is restricted to administrators: create the first function using an administrator account"*. **To retest:** a paid or company **sandbox** org, an admin with "Manage Automation", and one function created by hand first. |
 
 ## Sources (all fetched 2026-11-22)
 - API reference index: https://www.zoho.com/crm/developer/docs/api/v8/api-references.html

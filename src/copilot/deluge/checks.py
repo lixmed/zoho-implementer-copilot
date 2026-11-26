@@ -22,15 +22,15 @@ CATEGORY_RETURN = {
     "related_list": {"string"},
     "validation": {"map"},
 }
-# Declaration keyword per plan category. Only "standalone" is confirmed by a Zoho sample;
-# the others follow the same pattern and are confirmed by Zoho's compiler on push.
+# Declaration keyword per plan category. Zoho's create-function doc: "the category name in
+# lowercase, with spaces replaced by underscores" (Related List -> related_list, etc.).
 DECL_KEYWORD = {
     "automation": "automation",
     "standalone": "standalone",
     "button": "button",
     "schedule": "schedule",
-    "related_list": "relatedlist",
-    "validation": "validationrule",
+    "related_list": "related_list",
+    "validation": "validation_rule",
 }
 
 DECL_RE = re.compile(r"^\s*(\w+)\s+([a-z_]+)\.([a-z][a-z0-9_]*)\s*\((.*?)\)\s*\{", re.M | re.S)
