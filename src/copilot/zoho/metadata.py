@@ -68,6 +68,28 @@ def get_org(c: ZohoReadClient) -> dict:
     return pick(orgs[0], ORG_KEYS) if orgs else {}
 
 
+LICENSE_KEYS = (
+    "paid", "paid_type", "paid_expiry", "trial_type", "trial_expiry", "trial_action",
+    "users_license_purchased", "license_type", "edition",
+)  # fmt: skip
+
+
+def org_edition_info(c: ZohoReadClient) -> dict:
+    """Edition/licence facts only (no company name, emails or phones), plus the key names so
+    we can see what Zoho actually returns for this kind of org."""
+    orgs = c.get("/org", use_cache=False).get("org", [])
+    if not orgs:
+        return {}
+    org = orgs[0]
+    lic = org.get("license_details") if isinstance(org.get("license_details"), dict) else {}
+    return {
+        "type": org.get("type"),
+        "license_details": pick(lic, LICENSE_KEYS),
+        "license_keys": sorted(lic),
+        "org_keys": sorted(org),
+    }
+
+
 def list_modules(c: ZohoReadClient) -> list[dict]:
     return [pick(m, MODULE_KEYS) for m in c.get("/settings/modules").get("modules", [])]
 
@@ -80,7 +102,7 @@ def _field_view(f: dict) -> dict:
         ]
     if isinstance(f.get("lookup"), dict) and f["lookup"].get("module"):
         out["lookup_module"] = f["lookup"]["module"].get("api_name")
-    if isinstance(f.get("formula"), dict):
+    if isinstance(f.get("formula"), dict) and f["formula"].get("expression"):
         out["formula"] = pick(f["formula"], ("expression", "return_type"))
     return out
 

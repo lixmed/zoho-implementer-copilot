@@ -133,6 +133,54 @@ def test_connect_refuses_env_mismatch_and_revokes(setup, monkeypatch, capsys):
     assert "Refusing" in capsys.readouterr().err
 
 
+PROD_API = "https://www.zohoapis.com"
+
+
+def _prod_token():
+    respx.post(f"{fake_zoho.ACCOUNTS}/oauth/v2/token").respond(
+        200, json=fake_zoho.token_body(api_domain=PROD_API)
+    )
+    return respx.post(f"{fake_zoho.ACCOUNTS}/oauth/v2/revoke/token").respond(200)
+
+
+@respx.mock
+def test_own_unpaid_org_connects_as_test_after_typed_id(setup, monkeypatch, capsys):
+    revoke = _prod_token()
+    fake_zoho.mount(respx.mock, api=PROD_API)
+    monkeypatch.setattr("builtins.input", lambda prompt="": "900001")
+    assert connect(monkeypatch, fake_browser(), env="test") == 0
+    org = OrgRegistry().get("demo-dev-org")
+    assert org.environment == "test" and org.edition == "free (enterprise trial)"
+    assert not revoke.called
+
+
+@respx.mock
+def test_test_env_refuses_wrong_id(setup, monkeypatch, capsys):
+    revoke = _prod_token()
+    fake_zoho.mount(respx.mock, api=PROD_API)
+    monkeypatch.setattr("builtins.input", lambda prompt="": "123")
+    assert connect(monkeypatch, fake_browser(), env="test") == 2
+    assert revoke.called and OrgRegistry().list() == []
+
+
+@respx.mock
+def test_test_env_refuses_paid_org(setup, monkeypatch, capsys):
+    revoke = _prod_token()
+    paid = {
+        "org": [
+            {
+                **fake_zoho.ORG["org"][0],
+                "license_details": {"paid": True, "paid_type": "enterprise"},
+            }
+        ]
+    }
+    respx.get(f"{PROD_API}/crm/v8/org").respond(200, json=paid)
+    monkeypatch.setattr("builtins.input", lambda prompt="": pytest.fail("must not ask"))
+    assert connect(monkeypatch, fake_browser(), env="test") == 2
+    assert revoke.called and OrgRegistry().list() == []
+    assert "PAID license" in capsys.readouterr().err
+
+
 @respx.mock
 def test_connect_rejects_tampered_state(setup, monkeypatch, capsys):
     token = respx.post(f"{fake_zoho.ACCOUNTS}/oauth/v2/token").respond(200, json={})

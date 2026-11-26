@@ -81,6 +81,7 @@ def cmd_connect(args: argparse.Namespace) -> int:
             redirect,
             verifier,
         )
+        print(f"Token exchange OK (request format: {oauth.last_transport}).")
         if not tok.refresh_token:
             print(
                 "Zoho did not return a refresh token; cannot keep the org connected.",
@@ -88,13 +89,21 @@ def cmd_connect(args: argparse.Namespace) -> int:
             )
             return 1
 
+        class _Static:
+            def get(self, force_refresh: bool = False) -> str:
+                return tok.access_token
+
+        reader = ZohoReadClient(tok.api_domain, _Static(), http=http)
         detected = environment_from_api_domain(tok.api_domain)
-        if detected != args.env:
-            print(
-                f"Refusing: you said --env {args.env} but Zoho issued a token for a {detected} "
-                f"environment ({tok.api_domain}). Nothing was saved.",
-                file=sys.stderr,
-            )
+
+        def refuse(message: str, show_edition: bool = True) -> int:
+            print(f"Refusing: {message} Nothing was saved.", file=sys.stderr)
+            if show_edition:
+                try:  # evidence for the user: how does Zoho describe this org's edition?
+                    print("Org edition info (no names/emails):", file=sys.stderr)
+                    print(json.dumps(metadata.org_edition_info(reader), indent=2), file=sys.stderr)
+                except Exception as exc:  # noqa: BLE001 (diagnostic only, must not block revoke)
+                    print(f"(could not read org edition info: {exc})", file=sys.stderr)
             oauth.revoke_refresh_token(
                 http,
                 callback.accounts_server,
@@ -104,26 +113,55 @@ def cmd_connect(args: argparse.Namespace) -> int:
             )
             return 2
 
-        class _Static:
-            def get(self, force_refresh: bool = False) -> str:
-                return tok.access_token
-
-        org_info = metadata.get_org(ZohoReadClient(tok.api_domain, _Static(), http=http))
+        environment = detected
+        if args.env == "test":
+            # Your own free/trial org: Zoho reports it as "production". Accept it only if it's
+            # unpaid AND the user confirms its id. A real client's live org is almost always paid.
+            if detected != "production":
+                return refuse(
+                    f"--env test is for a production-type org you own, but Zoho says this is {detected}; use --env {detected}."
+                )
+            lic = metadata.org_edition_info(reader).get("license_details", {})
+            if lic.get("paid") is not False:
+                return refuse(
+                    "this org has a PAID license, so it looks like a real (client) org. --env test only accepts unpaid orgs."
+                )
+            org_info = metadata.get_org(reader)
+            org_id = str(org_info.get("id", ""))
+            print(
+                f"\nOrg: {org_info.get('company_name', '?')} (id {org_id}): "
+                f"{lic.get('paid_type')}, {lic.get('trial_type')} trial until {lic.get('trial_expiry')}"
+            )
+            typed = input(
+                "Type the org id to confirm this is YOUR OWN test org with fake data only: "
+            )
+            if not org_id or typed.strip().lstrip("\ufeff") != org_id:
+                return refuse("org id not confirmed.", show_edition=False)
+            environment = "test"
+            edition = f"{lic.get('paid_type')} ({lic.get('trial_type')} trial)"
+        elif detected != args.env:
+            return refuse(
+                f"you said --env {args.env} but Zoho issued a token for a {detected} "
+                f"environment ({tok.api_domain}). If this is your own unpaid test org, use --env test."
+            )
+        else:
+            org_info = metadata.get_org(reader)
+            edition = org_info.get("type")
 
     secrets.save_refresh_token(slug, tok.refresh_token)
     profile = OrgProfile(
         slug=slug,
         name=args.name,
-        environment=detected,
+        environment=environment,
         dc=dc.key,
         accounts_server=callback.accounts_server,
         api_domain=tok.api_domain,
         scopes=(tok.scope.replace(",", " ").split() if tok.scope else list(scopes)),
         zoho_org_id=str(org_info.get("id")) if org_info.get("id") else None,
-        edition=org_info.get("type"),
+        edition=edition,
     )
     OrgRegistry().upsert(profile)
-    print(f"Connected '{args.name}' as '{slug}' ({detected}, DC {dc.key}, {tok.api_domain}).")
+    print(f"Connected '{args.name}' as '{slug}' ({environment}, DC {dc.key}, {tok.api_domain}).")
     return 0
 
 
@@ -241,7 +279,7 @@ def cmd_plan_approve(args: argparse.Namespace) -> int:
     print(f"About to approve {p.slug} plan v{plan.version}: {len(plan.items)} items.")
     print(f"Review first: {p.plans_dir / f'plan.v{plan.version}.md'}")
     # strip a BOM too: PowerShell pipes one in front of redirected input
-    typed = input(f"Type the project slug ({p.slug}) to approve: ").strip().lstrip("﻿")
+    typed = input(f"Type the project slug ({p.slug}) to approve: ").strip().lstrip("\ufeff")
     if typed != p.slug:
         print("Not approved.", file=sys.stderr)
         return 2
@@ -312,7 +350,7 @@ def cmd_deluge_push(args: argparse.Namespace) -> int:
     from copilot.projects.workspace import open_project
 
     def confirm(prompt: str) -> bool:
-        return input(prompt).strip().lstrip("﻿") == args.name
+        return input(prompt).strip().lstrip("\ufeff") == args.name
 
     try:
         out = push_function(open_project(args.project), args.name, confirm)
@@ -323,6 +361,8 @@ def cmd_deluge_push(args: argparse.Namespace) -> int:
         print(f"Not pushed: {out.get('reason') or out.get('code')}: {out.get('message') or ''}")
         if out.get("details"):
             print(json.dumps(out["details"], indent=2))
+        if out.get("fallback"):
+            print(out["fallback"])
         return 1
     print(f"{out['action'].title()}d '{args.name}' in {out['org']} (plan v{out['plan_version']}).")
     print("Not attached to any workflow: attach it after approval, using the handoff checklist.")
@@ -359,7 +399,7 @@ def build_parser() -> argparse.ArgumentParser:
     c = sub.add_parser("connect", help="connect a Zoho org via OAuth")
     c.add_argument("--name", required=True, help="display name, e.g. 'My Dev Org'")
     c.add_argument("--slug", help="short id (default: derived from name)")
-    c.add_argument("--env", required=True, choices=["developer", "sandbox", "production"])
+    c.add_argument("--env", required=True, choices=["developer", "sandbox", "test", "production"])
     c.add_argument("--port", type=int, default=oauth.DEFAULT_PORT)
     c.add_argument(
         "--allow-writes",

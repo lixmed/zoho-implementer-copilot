@@ -15,7 +15,7 @@ from urllib.parse import urlsplit
 import platformdirs
 from pydantic import BaseModel, Field
 
-Environment = Literal["production", "sandbox", "developer"]
+Environment = Literal["production", "sandbox", "developer", "test"]
 
 
 class OrgProfile(BaseModel):

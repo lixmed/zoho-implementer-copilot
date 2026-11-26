@@ -22,6 +22,16 @@ ORG = {
             "time_zone": "America/New_York",
             "currency": "USD",
             "type": "developer",
+            # shape recorded from a real free org (values changed)
+            "license_details": {
+                "paid": False,
+                "paid_type": "free",
+                "paid_expiry": None,
+                "trial_type": "enterprise",
+                "trial_expiry": "2026-12-10T02:00:00+02:00",
+                "users_license_purchased": 3,
+                "portal_users_license_purchased": 0,
+            },
         }
     ]
 }
