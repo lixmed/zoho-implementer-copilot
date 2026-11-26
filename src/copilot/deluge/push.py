@@ -48,7 +48,7 @@ def push_function(
     if not project.info.org:
         raise PushRefusedError("project has no linked org (copilot project new ... --org <slug>)")
     org = OrgRegistry().get(project.info.org)
-    if org.environment not in ("developer", "sandbox"):
+    if org.environment not in ("developer", "sandbox", "test"):
         raise PushRefusedError(
             f"org {org.slug} is {org.environment}; pushes go to developer/sandbox only"
         )
@@ -119,5 +119,12 @@ def push_function(
         "details": result.get("details"),
         "attached_to_workflow": False,
     }
+    if not result.ok and result.get("code") == "INVALID_REQUEST" and not existing:
+        # Seen on a real free/trial org (2026-11-26): GET /settings/functions works but
+        # POST returns INVALID_REQUEST for both inline _code and a .ds file. Fall back to paste.
+        outcome["fallback"] = (
+            "This org does not accept function creation via the API. Paste the code instead: "
+            f"{handoff.handoff_dir(project) / (name + '.dg')} (the header says where)."
+        )
     handoff.record_push(project, name, outcome)
     return outcome

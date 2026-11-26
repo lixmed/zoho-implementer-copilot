@@ -57,8 +57,12 @@ class ZohoWriteClient:
         self._project, self._plan_version = project, plan_version
         self.base = f"{org.api_domain.rstrip('/')}/crm/{API_VERSION}"
 
-    def _send(self, method: str, path: str, metadata: dict) -> tuple[int, dict]:
+    def _send(
+        self, method: str, path: str, metadata: dict, code_file: tuple[str, str] | None = None
+    ) -> tuple[int, dict]:
         files = {"metadata": ("function.json", json.dumps(metadata), "application/json")}
+        if code_file:  # Deluge source as a separate .ds part instead of inline "_code"
+            files["code"] = (code_file[0], code_file[1], "application/octet-stream")
         resp = self._http.request(
             method,
             f"{self.base}{path}",
@@ -71,14 +75,26 @@ class ZohoWriteClient:
             body = {"code": "HTTP_ERROR", "message": resp.text[:300]}
         return resp.status_code, _first_result(body)
 
-    def _audited(self, action: str, target: str, method: str, path: str, metadata: dict, before):
-        status, result = self._send(method, path, metadata)
+    def _audited(
+        self,
+        action: str,
+        target: str,
+        method: str,
+        path: str,
+        metadata: dict,
+        before,
+        code_file: tuple[str, str] | None = None,
+    ):
+        status, result = self._send(method, path, metadata, code_file)
         ok = result.get("status") == "success" and status < 300
+        fn_meta = metadata["functions"][0]
+        code_len = len(code_file[1]) if code_file else len(fn_meta.get("_code", ""))
         safe_meta = {
             "functions": [
-                {k: v for k, v in metadata["functions"][0].items() if k != "_code"}
-                | {"code_chars": len(metadata["functions"][0].get("_code", ""))}
-            ]
+                {k: v for k, v in fn_meta.items() if k != "_code"} | {"code_chars": code_len}
+            ],
+            "code_sent_as": "file" if code_file else "_code",
+            "http_status": status,
         }
         self._audit.record(
             org=self.org.slug,
@@ -100,23 +116,22 @@ class ZohoWriteClient:
         )
 
     def create_function(
-        self, api_name: str, category: str, code: str, description: str
+        self, api_name: str, category: str, code: str, description: str, code_as_file: bool = False
     ) -> ZohoWriteResult:
-        metadata = {
-            "functions": [
-                {
-                    "name": api_name,
-                    "api_name": api_name,
-                    "description": description[:3000],
-                    "runtime": "Deluge 1.0",
-                    "category": category,
-                    "_code": code,
-                }
-            ]
+        fn = {
+            "name": api_name,
+            "api_name": api_name,
+            "description": description[:3000],
+            "runtime": "Deluge 1.0",
+            "category": category,
         }
+        if not code_as_file:
+            fn["_code"] = code
+        code_file = (f"{api_name}.ds", code) if code_as_file else None
         return self._audited(
-            "create_function", api_name, "POST", "/settings/functions", metadata, None
-        )
+            "create_function", api_name, "POST", "/settings/functions", {"functions": [fn]}, None,
+            code_file,
+        )  # fmt: skip
 
     def update_function(
         self, function_id: str, api_name: str, code: str, changelog: str, before: dict
