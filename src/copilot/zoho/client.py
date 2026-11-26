@@ -48,6 +48,11 @@ class ZohoReadClient:
         self.credits_remaining: int | None = None
         self.calls_made = 0
 
+    @property
+    def tokens(self) -> TokenSource:
+        """Shared with the write client so both use one token cache (and one refresh budget)."""
+        return self._tokens
+
     def get(self, path: str, params: dict[str, Any] | None = None, use_cache: bool = True) -> dict:
         key = (path, tuple(sorted((params or {}).items())))
         if use_cache and key in self._cache:
