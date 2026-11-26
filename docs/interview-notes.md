@@ -20,6 +20,14 @@ Zoho's MCP executes changes. My tool delivers projects. The headline feature is 
 **Q: How does the tool handle Zoho's data centres?**
 It never hardcodes the API URL. Authorization starts at accounts.zoho.com. The callback says which accounts server the user belongs to, and the token response returns `api_domain`. Both are stored per org profile.
 
+## Testing against real Zoho (what the docs didn't tell me)
+
+**Q: What did you learn testing against a real org?**
+Three things the docs didn't say. First, Zoho's token endpoint intermittently rejected my PKCE verifiers with a generic HTML error page. The verifiers were valid per the RFC, but they contained `.` and `~`. Switching to base64url characters fixed it. I only found that by making the error message show Zoho's actual page text. Second, a free trial org reports itself as *production*, so my environment safety check refused it, correctly. Instead of weakening the check, I added a `test` environment that's only accepted if Zoho says the license is unpaid *and* the user types the org id. Third, the documented "create function" API returned INVALID_REQUEST on that org even with a request matching the doc sample, while reads on the same path worked. So API push is best-effort, and the paste-from-handoff path is the reliable one. That's exactly why the design never depended on it.
+
+**Q: How did you debug without making a mess in the client's org?**
+It was my own trial org with fake data. Every write attempt, including the failed ones, is in the append-only audit log. When the create API failed, I tried one controlled variant (code as a file instead of inline), audited, and then stopped instead of hammering a production API.
+
 ## Phase 3: Deluge generation
 
 **Q: How do you make generated Deluge use real functions and real field names?**

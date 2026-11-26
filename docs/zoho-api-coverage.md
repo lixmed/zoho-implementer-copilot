@@ -237,6 +237,22 @@ Not chosen for now (can revisit later): impact analysis and dependency graph, dr
 
 ---
 
+## 10. Verified against a real org (2026-11-26)
+
+Free CRM org on a 15-day Enterprise trial, US DC.
+
+| Question | Result |
+|---|---|
+| Localhost redirect `http://127.0.0.1:8765/callback` | ✅ Accepted by Zoho |
+| Token request format | ✅ form-urlencoded body works |
+| PKCE | ✅ Works, **but** verifiers containing `.` or `~` (valid per RFC 7636) intermittently get a generic HTML 400 page *"An error occurred while processing your request"*. We now use base64url characters only. |
+| Environment of a free/trial org | `api_domain` is `https://www.zohoapis.com`, `GET /org` returns `"type": "production"` and `license_details.paid: false, paid_type: "free", trial_type: "enterprise"`. Nothing says "developer". The tool's `--env test` accepts it only if unpaid and the user types the org id. |
+| All 11 metadata read endpoints | ✅ Work: modules (32), fields, layouts, related lists, picklist values, workflow rules, blueprints, functions, roles, profiles, users (masked) |
+| `X-API-CREDITS-REMAINING` header | Not sent at low usage (as documented: only from 50% of the daily limit) |
+| Fields without a formula | Return `"formula": {}` |
+| **`POST /settings/functions` (create function)** | ❌ `INVALID_REQUEST` ("verify method name, parameter and parameter values") for both inline `_code` and a `.ds` file part, with a request matching the doc sample. `GET` on the same path works. Likely not enabled for this edition or rollout. **The paste-from-handoff path is the reliable route; API push is best-effort.** |
+| Deluge declaration for automation functions | ❓ Still unverified (create is unavailable on this org) |
+
 ## Sources (all fetched 2026-11-22)
 - API reference index: https://www.zoho.com/crm/developer/docs/api/v8/api-references.html
 - What's new in v8: https://www.zoho.com/crm/developer/docs/api/v8/whats-new.html
