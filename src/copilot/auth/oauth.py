@@ -12,6 +12,7 @@ Access tokens (1 hour) are kept in memory only.
 from __future__ import annotations
 
 import http.server
+import re
 import secrets as pysecrets
 import threading
 import time
@@ -154,15 +155,42 @@ class TokenResponse:
         return f"TokenResponse(api_domain={self.api_domain!r}, expires_in={self.expires_in})"
 
 
+# Zoho's docs disagree on how to send token parameters: the Accounts reference shows them as
+# query parameters on the POST, the CRM docs say "form-data" in the body. In practice Zoho
+# sometimes answers a format it dislikes with a generic HTML error page (not JSON), and that
+# request is not processed, so the next format can still use the same grant code.
+TOKEN_TRANSPORTS = ("form", "query", "multipart")
+last_transport: str | None = None  # which one Zoho accepted most recently (for diagnostics)
+
+
+def _post_token(http: httpx.Client, url: str, data: dict[str, str], transport: str):
+    if transport == "query":
+        return http.post(url, params=data)
+    if transport == "multipart":
+        return http.post(url, files={k: (None, v) for k, v in data.items()})
+    return http.post(url, data=data)
+
+
+def _html_excerpt(text: str) -> str:
+    page = re.sub(r"<(style|script)[^>]*>.*?</\1>", " ", text, flags=re.S | re.I)
+    return " ".join(re.sub(r"<[^>]+>", " ", page).split())[:300]
+
+
 def _token_request(http: httpx.Client, accounts_server: str, data: dict[str, str]) -> TokenResponse:
+    global last_transport
     dc_for_accounts_server(accounts_server)  # never send secrets to a non-Zoho host
-    resp = http.post(f"{accounts_server}/oauth/v2/token", data=data)
-    try:
-        body = resp.json()
-    except ValueError:
-        raise OAuthError(
-            f"token endpoint returned HTTP {resp.status_code}, non-JSON body"
-        ) from None
+    url = f"{accounts_server}/oauth/v2/token"
+    failures = []
+    for transport in TOKEN_TRANSPORTS:
+        resp = _post_token(http, url, data, transport)
+        try:
+            body = resp.json()
+            last_transport = transport
+            break
+        except ValueError:
+            failures.append(f"{transport}: HTTP {resp.status_code} {_html_excerpt(resp.text)!r}")
+    else:
+        raise OAuthError("token endpoint rejected every request format: " + " | ".join(failures))
     # Zoho reports some token errors with HTTP 200 and an "error" key.
     if resp.status_code != 200 or "error" in body:
         raise OAuthError(f"token request failed: {body.get('error', resp.status_code)}")
@@ -236,7 +264,9 @@ def new_state() -> str:
 
 
 def new_pkce_pair() -> tuple[str, str]:
-    verifier = pkce.generate_verifier()
+    # base64url alphabet only (A-Z a-z 0-9 - _): a valid RFC 7636 subset that avoids "." and "~",
+    # which Zoho's token endpoint appeared to reject intermittently with an HTML error page.
+    verifier = pysecrets.token_urlsafe(48)  # 64 chars
     return verifier, pkce.challenge_s256(verifier)
 
 

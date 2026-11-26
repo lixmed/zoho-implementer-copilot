@@ -105,6 +105,33 @@ def test_zoho_error_with_http_200_is_raised():
         oauth.exchange_code(http, "https://accounts.zoho.com", "cid", "sec", "bad", "r", "v")
 
 
+@respx.mock
+def test_html_error_page_falls_back_to_query_params():
+    route = respx.post(url__startswith="https://accounts.zoho.com/oauth/v2/token")
+    route.side_effect = [
+        httpx.Response(400, text="<html><style>x{}</style><p>An error occurred</p></html>"),
+        httpx.Response(200, json={"access_token": "at", "api_domain": "https://www.zohoapis.com"}),
+    ]
+    with httpx.Client() as http:
+        tok = oauth.exchange_code(http, "https://accounts.zoho.com", "cid", "sec", "c", "r", "v")
+    assert tok.access_token == "at"
+    assert oauth.last_transport == "query"
+    second = route.calls[1].request
+    assert second.url.params["code_verifier"] == "v" and second.content == b""
+
+
+@respx.mock
+def test_all_formats_rejected_reports_each():
+    respx.post(url__startswith="https://accounts.zoho.com/oauth/v2/token").respond(
+        400, text="<html><p>An error occurred while processing your request</p></html>"
+    )
+    with httpx.Client() as http, pytest.raises(oauth.OAuthError) as exc:
+        oauth.exchange_code(http, "https://accounts.zoho.com", "cid", "sec", "c", "r", "v")
+    msg = str(exc.value)
+    assert "form:" in msg and "query:" in msg and "multipart:" in msg
+    assert "An error occurred" in msg and "<p>" not in msg
+
+
 def test_token_request_refuses_foreign_host():
     with httpx.Client() as http, pytest.raises(UnknownDataCentreError):
         oauth.refresh_access_token(http, "https://evil.io", "cid", "sec", "rt")
