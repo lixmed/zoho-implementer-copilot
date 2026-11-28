@@ -39,6 +39,16 @@ Client refresh tokens, the Zoho client secret, client org metadata, and (never i
 | No trace of changes | Append-only SQLite audit log (UPDATE and DELETE blocked by triggers): actor, time, org, environment, plan version, before/after, result. |
 | Doc lookups leaking project details | Search ranks locally, so queries never leave the machine. Fetches are allowlisted to zoho.com doc paths, redirects included. |
 
+## Phase 4 additions (Builder)
+| Threat | Control |
+|---|---|
+| Applying unreviewed changes | Preview first (operations and credits). Typed project slug. Approved, unchanged plan only. No apply or rollback tool over MCP. |
+| Data loss on rollback | Soft rollback by default (hide, deactivate, restore from snapshot). Hard delete needs a typed `DELETE` that names the data loss. |
+| Half-applied change sets | Stop at the first failure, save state, offer rollback. Every operation's status is recorded. |
+| Drift between plan and org | The change set is built against live metadata. Existing items are skipped, and missing layouts or sections block the apply. |
+| Untraceable changes | `before.json`, `after.json` and `diff.json` per change set, plus the append-only audit log. |
+| Guessing API formats | Only operations with verified request shapes are automated. The rest stay handoff steps. |
+
 ## Planned
 - Phase 4: generalize the write tier (fields, layouts, workflows) with snapshots, diff and rollback, reusing the Phase 3 audit log and approval gates.
 - Phase 7: production profile with a typed confirmation, and API credit budgets.

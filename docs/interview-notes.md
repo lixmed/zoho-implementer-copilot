@@ -20,6 +20,23 @@ Zoho's MCP executes changes. My tool delivers projects. The headline feature is 
 **Q: How does the tool handle Zoho's data centres?**
 It never hardcodes the API URL. Authorization starts at accounts.zoho.com. The callback says which accounts server the user belongs to, and the token response returns `api_domain`. Both are stored per org profile.
 
+## Phase 4: Builder
+
+**Q: How do you apply a plan to Zoho safely?**
+The approved plan and the live org metadata are turned into a *change set*: an ordered list of operations, each with its exact API request and what it takes to undo it. You see that list, with API credits, before anything happens, and you type the project slug to apply. Operations run in dependency order: fields before the layouts that place them, actions before the workflow rules that reference them. Ids that don't exist yet are placeholders, resolved as each step returns.
+
+**Q: What happens if step 4 of 7 fails?**
+It stops. Steps 5 to 7 are marked not-run, the state is saved, and I'm offered a rollback of steps 1 to 3. I chose stop-and-ask over auto-rollback because a rollback can fail too, and a human should see the situation first.
+
+**Q: Why is rollback "soft"?**
+Deleting a Zoho field deletes every value in it, and my tool deliberately has no permission to read records, so it can't know whether someone already typed data in. Soft rollback hides fields (moves them to Unused Items), restores picklists and layout positions from the snapshot, and deactivates workflow rules. Everything stays recoverable. Hard delete exists, but only behind a second typed confirmation that spells out the data loss.
+
+**Q: Isn't it risky to let an LLM build workflows?**
+The LLM never builds them directly. It writes a plan, and the plan only becomes API calls if it has *structured* conditions and actions whose request formats I verified from Zoho's docs. Free-text criteria, email notifications (they need a template) and webhooks stay manual handoff steps, and the validator tells the agent exactly why. Every write is audited, and the whole thing is idempotent: running apply twice skips what's already there.
+
+**Q: How do you know your Zoho payloads are right without a paid org?**
+Every request shape comes from a v8 doc sample, and I list the few that are inferred. The tests run against a stateful fake Zoho: creating a field really makes it appear in later reads, layout patches move fields, and rules switch on and off. So apply → diff → rollback is tested end to end. The final check is the company sandbox.
+
 ## Testing against real Zoho (what the docs didn't tell me)
 
 **Q: What did you learn testing against a real org?**

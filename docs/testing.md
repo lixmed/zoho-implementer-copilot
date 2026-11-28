@@ -14,9 +14,10 @@ uv run pytest
   4. A wrong-slug approval is refused, then the human approves at the CLI.
   5. The sign-off doc and UAT script are exported.
   6. Deluge: the agent gets the function brief. Bad code (hard-coded token, no connection) is refused, and good code is saved with tests. A wrong typed name means nothing is sent. Zoho's compiler rejects the first push, the error is read back, and the second push succeeds. Only the functions endpoint is written to (no workflow calls), and the audit log has both attempts.
-  7. The client emails a change request (new feature, one withdrawn). Old unit ids don't move. The agent saves v2.
-  8. `plan diff` produces the change request against the approved version, with the effort delta.
-  9. The project ends: `orgs remove --revoke`, and the keychain and registry are empty.
+  7. Builder: `preview_changes` lists the operations (a field, a picklist add) and the handoff items. A wrong typed slug means nothing is sent. The correct slug applies (audited), then a soft rollback runs with no DELETE calls.
+  8. The client emails a change request (new feature, one withdrawn). Old unit ids don't move. The agent saves v2.
+  9. `plan diff` produces the change request against the approved version, with the effort delta.
+  10. The project ends: `orgs remove --revoke`, and the keychain and registry are empty.
 
   Run just the story with `uv run pytest tests/test_story.py -v`.
 - The fake responses follow the v8 docs and are **not recorded from a real org yet**. Level B fixes that.
@@ -44,3 +45,5 @@ Then:
 
 ## Level C: Zoho sandbox (later, Phase 4)
 Sandboxes come with Enterprise and Ultimate (paid), or possibly with the developer edition (unverified). Until we know, the developer org itself is our "sandbox" target for writes.
+
+- **Builder** (`tests/test_builder.py`, stateful fake in `tests/fake_builder.py`): preview order, apply, soft and hard rollback, stop on failure plus rollback, idempotent re-run, typed confirm, gates (scopes, production, edited plan, missing section).
