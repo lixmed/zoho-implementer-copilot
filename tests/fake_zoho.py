@@ -251,7 +251,7 @@ def mount(router: respx.Router, api: str = DEV_API) -> None:
     router.get(f"{base}/settings/related_lists").respond(204)
     router.get(f"{base}/settings/automation/workflow_rules").respond(200, json=WORKFLOWS)
     router.get(f"{base}/settings/blueprints").respond(204)
-    router.get(f"{base}/settings/functions").respond(200, json=FUNCTIONS)
+    router.get(f"{base}/settings/functions", name="functions_list").respond(200, json=FUNCTIONS)
     router.get(f"{base}/settings/roles").respond(200, json=ROLES)
     router.get(f"{base}/settings/profiles").respond(200, json=PROFILES)
     router.get(f"{base}/users").respond(200, json=USERS)

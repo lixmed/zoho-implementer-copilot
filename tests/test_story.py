@@ -23,13 +23,16 @@ import keyring
 import respx
 from deluge_samples import BAD as BAD_DELUGE
 from deluge_samples import GOOD as GOOD_DELUGE
+from fake_runtime import FakeRuntime
 from test_e2e import free_port
 
 from copilot import cli
 from copilot.audit.log import AuditLog
 from copilot.auth import secrets
+from copilot.deluge.testloop import function_metrics
 from copilot.mcp_server import server as mcp_mod
 from copilot.orgs.registry import OrgRegistry
+from copilot.projects.workspace import open_project
 
 SLUG = "acme-realty/onboarding"
 ORG = "acme-dev"
@@ -105,7 +108,8 @@ def test_acme_realty_full_story(tmp_path, monkeypatch, capsys):
     secrets.save_client(secrets.ClientCredentials("cid", {"us": "client-secret"}))
     monkeypatch.setattr(cli.webbrowser, "open", fake_browser_approves)
     assert cli.main(["connect", "--name", "Acme Dev", "--slug", ORG, "--env", "developer",
-                     "--port", str(free_port()), "--allow-writes"]) == 0  # fmt: skip
+                     "--port", str(free_port()), "--allow-writes",
+                     "--allow-test-records", "--test-modules", "Leads"]) == 0  # fmt: skip
     sent = token.calls[0].request.content.decode()
     assert "code_verifier=" in sent and "client-secret" in sent
 
@@ -274,6 +278,43 @@ def test_acme_realty_full_story(tmp_path, monkeypatch, capsys):
     assert [e["result"] for e in audit] == ["success", "error:COMPILATION_ERROR"]
     assert all("slack.com" not in (e["after_json"] or "") for e in audit)  # code not stored
 
+    # --- 7b2. Test loop: core + wrapper, fake test record, execute, compare, clean up -----
+    core = (
+        "string standalone.post_hot_lead_core(String record_id)\n{\n\tresult = Map();\n"
+        '\tlead = zoho.crm.getRecordById("Leads", record_id.toLong());\n'
+        '\tif(lead == null)\n\t{\n\t\tinfo "no lead";\n\t\tresult.put("status","error");\n\t\treturn result.toString();\n\t}\n'
+        '\tinfo "lead " + record_id;\n\tresult.put("status","ok");\n\treturn result.toString();\n}\n'
+    )
+    core_tests = [{"name": "hot lead", "module": "Leads", "record": {"Last_Name": "COPILOT TEST", "Lead_Temperature": "Hot"},
+                   "input": {"record_id": "$record_id"}, "expected": {"status": "ok"}}]  # fmt: skip
+    assert call(
+        "save_deluge", project=SLUG, name="post_hot_lead_core", code=core, tests=core_tests
+    )["saved"]
+    create.side_effect = None
+    create.respond(
+        201,
+        json={"functions": [{"code": "SUCCESS", "status": "success", "details": {"id": "777002"}}]},
+    )
+    monkeypatch.setattr(builtins, "input", lambda prompt="": "post_hot_lead_core")
+    assert cli.main(["deluge", "push", SLUG, "post_hot_lead_core"]) == 0
+    respx.mock.routes["functions_list"].respond(200, json={"functions": [
+        {"api_name": "post_hot_lead", "id": "777001"}, {"api_name": "post_hot_lead_core", "id": "777002"}]})  # fmt: skip
+    runtime = FakeRuntime()
+    runtime.define(
+        "post_hot_lead_core",
+        lambda args, rt: (
+            {"status": "ok"} if args["record_id"] in rt.records["Leads"] else {"status": "error"}
+        ),
+    )
+    runtime.mount(respx.mock)
+    assert cli.main(["deluge", "test", SLUG, "post_hot_lead_core"]) == 0
+    assert runtime.records["Leads"] == {}  # fake test record cleaned up
+    assert (
+        call("get_test_results", project=SLUG, name="post_hot_lead_core")["latest"]["passed"] == 1
+    )
+    metrics = function_metrics(open_project(SLUG))
+    assert metrics["functions"]["post_hot_lead_core"]["passed_first_placement"] is True
+
     # --- 7c. Builder: preview, typed apply, audit, soft rollback --------------------------
     preview = call("preview_changes", project=SLUG)
     assert [(o["item_id"], o["kind"]) for o in preview["operations"]] == [
@@ -295,7 +336,11 @@ def test_acme_realty_full_story(tmp_path, monkeypatch, capsys):
         "create_fields",
     ]
     assert cli.main(["rollback", SLUG]) == 0  # soft: hides the field, deletes nothing
-    assert not [c for c in respx.calls if c.request.method == "DELETE"]
+    assert not [
+        c
+        for c in respx.calls
+        if c.request.method == "DELETE" and "/settings/" in str(c.request.url)
+    ]
 
     # --- 8. change request: viewing feedback, and Slack is dropped -----------------------
     write_email(

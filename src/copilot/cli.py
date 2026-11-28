@@ -65,6 +65,22 @@ def cmd_connect(args: argparse.Namespace) -> int:
             "Requesting write scopes: Deluge functions, modules, fields, layouts, "
             "workflow rules and their actions (no record access)."
         )
+    if args.allow_test_records:
+        from copilot.zoho.write import FUNCTION_EXECUTE_SCOPES, test_record_scopes
+
+        modules = [m.strip() for m in (args.test_modules or "").split(",") if m.strip()]
+        if not modules:
+            print(
+                "--allow-test-records needs --test-modules, e.g. --test-modules Leads,Deals",
+                file=sys.stderr,
+            )
+            return 2
+        scopes = scopes + test_record_scopes(modules)
+        if not args.no_execute_scope:
+            scopes = scopes + FUNCTION_EXECUTE_SCOPES
+        print(
+            f"Requesting test-record access for {modules} (fake test records only; sandbox/test orgs)."
+        )
     url = oauth.build_authorize_url(creds.client_id, redirect, scopes, state, challenge)
 
     print(f"Redirect URI (must be registered in api-console.zoho.com): {redirect}")
@@ -457,6 +473,81 @@ def cmd_rollback(args: argparse.Namespace) -> int:
     return 0 if cs.status == "rolled_back" else 1
 
 
+def _print_run(run) -> None:
+    if run.setup_problem:
+        print(f"SETUP: {run.setup_problem}")
+    for c in run.cases:
+        print(f"{'PASS' if c.passed else 'FAIL'}  {c.name}")
+        for prob in c.problems:
+            print(f"      - {prob}")
+    print(
+        f"{run.passed} passed, {run.failed} failed ({run.function}, code {run.code_sha}, auth {run.auth})"
+    )
+
+
+def cmd_deluge_test(args: argparse.Namespace) -> int:
+    from copilot.deluge.testloop import TestLoopRefusedError, run_tests
+    from copilot.projects.workspace import open_project
+
+    try:
+        run = run_tests(open_project(args.project), args.name)
+    except TestLoopRefusedError as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 2
+    _print_run(run)
+    return 0 if run.all_passed else 1
+
+
+def cmd_deluge_loop(args: argparse.Namespace) -> int:
+    from copilot.deluge.push import push_function
+    from copilot.deluge.testloop import TestLoopRefusedError, fix_loop
+    from copilot.projects.workspace import open_project
+
+    p = open_project(args.project)
+
+    def confirm_push(diff: str) -> bool:
+        print("\nThe agent saved a fix:\n" + diff)
+        return _typed(args.name)(f"Type {args.name} to push this update and re-run the tests: ")
+
+    def push() -> dict:
+        out = push_function(p, args.name, lambda _prompt: True)  # already confirmed above
+        print(
+            "pushed"
+            if out.get("pushed")
+            else f"push failed: {out.get('code')}: {out.get('message')}"
+        )
+        return out
+
+    print(f"Running tests for {args.name}. On failure, ask the agent to fix it (get_test_results + save_deluge); "
+          f"this loop waits up to {args.wait} s for the saved fix. Ctrl+C to stop.")  # fmt: skip
+    try:
+        run = fix_loop(p, args.name, confirm_push, push, _print_run, args.max, args.wait)
+    except TestLoopRefusedError as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 2
+    return 0 if run.all_passed else 1
+
+
+def cmd_deluge_set_url(args: argparse.Namespace) -> int:
+    from copilot.deluge.testloop import save_api_key_url
+    from copilot.projects.workspace import open_project
+
+    p = open_project(args.project)
+    org = OrgRegistry().get(p.info.org)
+    url = getpass.getpass(f"Paste the API-key URL of {args.name} (input hidden): ")
+    save_api_key_url(org, args.name, url)
+    print("Stored in the OS keychain.")
+    return 0
+
+
+def cmd_deluge_metrics(args: argparse.Namespace) -> int:
+    from copilot.deluge.testloop import function_metrics
+    from copilot.projects.workspace import open_project
+
+    print(json.dumps(function_metrics(open_project(args.project)), indent=2))
+    return 0
+
+
 def cmd_audit(args: argparse.Namespace) -> int:
     from copilot.audit.log import AuditLog
 
@@ -493,6 +584,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--allow-writes",
         action="store_true",
         help="also request scopes to create/update Deluge functions (developer/sandbox only)",
+    )
+    c.add_argument(
+        "--allow-test-records",
+        action="store_true",
+        help="record access for the test loop (needs --test-modules)",
+    )
+    c.add_argument(
+        "--test-modules", help="comma-separated modules the test loop may create fake records in"
+    )
+    c.add_argument(
+        "--no-execute-scope",
+        action="store_true",
+        help="don't request the (undocumented) function execute scope",
     )
     c.set_defaults(func=cmd_connect)
 
@@ -584,6 +688,25 @@ def build_parser() -> argparse.ArgumentParser:
     dp.add_argument("project")
     dp.add_argument("name")
     dp.set_defaults(func=cmd_deluge_push)
+    dt = dl_sub.add_parser("test", help="run a function's test cases in the dev/sandbox/test org")
+    dt.add_argument("project")
+    dt.add_argument("name")
+    dt.set_defaults(func=cmd_deluge_test)
+    dlp = dl_sub.add_parser("loop", help="test -> agent fixes -> you confirm push -> re-test")
+    dlp.add_argument("project")
+    dlp.add_argument("name")
+    dlp.add_argument("--max", type=int, default=5, help="max test runs")
+    dlp.add_argument("--wait", type=float, default=600, help="seconds to wait for a fix")
+    dlp.set_defaults(func=cmd_deluge_loop)
+    du = dl_sub.add_parser(
+        "set-url", help="store a function's API-key URL (fallback if OAuth execute is refused)"
+    )
+    du.add_argument("project")
+    du.add_argument("name")
+    du.set_defaults(func=cmd_deluge_set_url)
+    dm = dl_sub.add_parser("metrics", help="test runs per function and first-placement pass rate")
+    dm.add_argument("project")
+    dm.set_defaults(func=cmd_deluge_metrics)
 
     au = sub.add_parser("audit", help="show the audit log of changes made in Zoho")
     au.add_argument("--org")

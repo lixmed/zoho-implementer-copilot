@@ -304,6 +304,22 @@ def get_push_result(project: str, name: str) -> dict:
 
 
 @_read_tool
+def get_test_results(project: str, name: str) -> dict:
+    """Latest test run of a function (per case: pass/fail, problems, output, compared record
+    fields) plus its attempt history. Fix failures, then save_deluge; the human's
+    `copilot deluge loop` pushes and re-runs."""
+    import json as _json
+
+    from copilot.deluge import handoff
+    from copilot.deluge.testloop import history
+
+    p = _project(project)
+    path = handoff.handoff_dir(p) / f"{name}.testrun.json"
+    run = _json.loads(path.read_text("utf-8")) if path.exists() else None
+    return {"latest": run, "attempts": len(history(p, name))}
+
+
+@_read_tool
 def preview_changes(project: str) -> dict:
     """What applying the latest APPROVED plan would change in the org right now: ordered
     operations, API credits, items already done (skipped) and items left as handoff.
@@ -369,6 +385,11 @@ Write the Deluge function `{name}` for project {project}.
    must NOT be attached to any workflow until they approve that separately.
 6. After a push, get_push_result: if Zoho reports a compilation error, fix the code at the
    reported line, check, save again, and ask the human to push again.
+7. Automation functions: write BOTH `<name>_core` (standalone, all logic, takes record_id,
+   returns the result map) and the thin `<name>` wrapper. Record-based tests on the core use
+   module + record (fake values) + input {"record_id": "$record_id"} + expect_record.
+8. Tests: the human runs `copilot deluge loop`. When a run fails, get_test_results, fix the
+   code, check_deluge, save_deluge (same tests). The loop shows them the diff and re-runs.
 """
 
 
