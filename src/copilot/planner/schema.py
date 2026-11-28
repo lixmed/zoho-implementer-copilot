@@ -40,7 +40,7 @@ class _Item(BaseModel):
     )
 
 
-class LayoutPlacement(BaseModel):
+class LayoutPlacement(BaseModel):  # for FieldItem.placement
     model_config = ConfigDict(extra="forbid")
     layout: str = "Standard"
     section: str
@@ -76,12 +76,40 @@ class ModuleItem(_Item):
     profiles: list[str] = Field(default_factory=lambda: ["Administrator"])
 
 
+class FieldPlacement(BaseModel):
+    """Structured layout change the Builder can apply: put a field in a section, set required."""
+
+    model_config = ConfigDict(extra="forbid")
+    field: str = Field(
+        description="field api_name in this module (existing or created in this plan)"
+    )
+    section: str = Field(description="existing section label in the layout")
+    required: bool = False
+
+
 class LayoutItem(_Item):
     kind: Literal["layout"] = "layout"
     module: str
     layout: str
     create_new: bool = Field(description="true = new layout (UI only); false = edit existing")
     changes: list[str] = Field(description="sections/fields to add, move, make required")
+    field_placements: list[FieldPlacement] = Field(
+        default_factory=list,
+        description="structured version of `changes`; needed for the Builder to apply it via API",
+    )
+
+
+class FieldUpdateSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    field: str = Field(description="field api_name in the rule's module")
+    value: str | list[str]
+
+
+class TaskSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    subject: str
+    due_in_days: int = Field(ge=0, description="due date = trigger time + N days")
+    priority: Literal["Highest", "High", "Normal", "Low", "Lowest"] = "High"
 
 
 class WorkflowAction(BaseModel):
@@ -89,6 +117,25 @@ class WorkflowAction(BaseModel):
     type: Literal["field_update", "email_notification", "task", "webhook", "function"]
     details: str
     uses_fields: list[str] = Field(default_factory=list, description="'Module.Field_Api_Name'")
+    field_update: FieldUpdateSpec | None = Field(
+        default=None, description="needed to apply via API"
+    )
+    task: TaskSpec | None = Field(default=None, description="needed to apply via API")
+
+    def api_ready(self) -> bool:
+        """Only field updates and tasks have verified request formats (Phase 4)."""
+        return (self.type == "field_update" and self.field_update is not None) or (
+            self.type == "task" and self.task is not None
+        )
+
+
+class WorkflowCondition(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    field: str = Field(description="field api_name in the rule's module")
+    # equal / contains / greater_than appear in Zoho's workflow samples; the others follow
+    # the same naming and are confirmed on the first sandbox run.
+    comparator: Literal["equal", "not_equal", "contains", "greater_than", "less_than"]
+    value: str | list[str] = Field(description='use "${NOTEMPTY}" for "is not empty"')
 
 
 class WorkflowItem(_Item):
@@ -98,6 +145,17 @@ class WorkflowItem(_Item):
     criteria: str = Field(description="plain-language condition, with field api_names")
     criteria_fields: list[str] = Field(default_factory=list, description="'Module.Field'")
     actions: list[WorkflowAction] = Field(min_length=1)
+    conditions: list[WorkflowCondition] = Field(
+        default_factory=list, description="structured criteria; needed to apply via API"
+    )
+    condition_operator: Literal["and", "or"] = "and"
+
+    def api_ready(self) -> bool:
+        return (
+            self.trigger in ("create", "edit", "create_or_edit", "delete")
+            and bool(self.conditions)
+            and all(a.api_ready() for a in self.actions)
+        )
 
 
 class FunctionItem(_Item):

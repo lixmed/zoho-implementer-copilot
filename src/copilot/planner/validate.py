@@ -46,10 +46,12 @@ def delivery_for(item) -> Delivery:
     if isinstance(item, (ConnectionItem, UiOnlyItem)):
         return "handoff"
     if isinstance(item, LayoutItem):
-        return "handoff" if item.create_new else "api"
+        # new layouts have no API; edits need structured placements to be applied by the Builder
+        return "api" if (not item.create_new and item.field_placements) else "handoff"
     if isinstance(item, WorkflowItem):
-        # attaching a function to a rule via API is unverified -> keep it a handoff step
-        return "handoff" if any(a.type == "function" for a in item.actions) else "api"
+        # needs structured conditions, and only field-update/task actions have verified formats
+        # (function attachment, email templates and webhooks stay handoff steps)
+        return "api" if item.api_ready() else "handoff"
     return "api"  # field, picklist_change, module, function (code deploy)
 
 
@@ -185,14 +187,31 @@ def validate(
         elif isinstance(i, LayoutItem):
             if not module_ok(i.module):
                 err(i.id, f"module {i.module!r} does not exist in the org or this plan")
+            check_refs(i.id, [f"{i.module}.{p.field}" for p in i.field_placements])
+            if not i.create_new and not i.field_placements:
+                warn(
+                    i.id,
+                    "no field_placements: stays a handoff step (the Builder can't apply free text)",
+                )
         elif isinstance(i, WorkflowItem):
             if not module_ok(i.module):
                 err(i.id, f"module {i.module!r} does not exist in the org or this plan")
             check_refs(i.id, i.criteria_fields)
+            check_refs(i.id, [f"{i.module}.{c.field}" for c in i.conditions])
             for a in i.actions:
                 check_refs(i.id, a.uses_fields)
+                if a.field_update:
+                    check_refs(i.id, [f"{i.module}.{a.field_update.field}"])
             if any(a.type == "email_notification" for a in i.actions):
                 warn(i.id, "email notification needs an existing email template (no create API)")
+            if not i.api_ready():
+                reasons = []
+                if not i.conditions:
+                    reasons.append("no structured conditions")
+                if i.trigger not in ("create", "edit", "create_or_edit", "delete"):
+                    reasons.append(f"trigger {i.trigger!r} not supported by the Builder")
+                reasons += [f"{a.type} action" for a in i.actions if not a.api_ready()]
+                warn(i.id, "stays a handoff step: " + ", ".join(reasons))
         elif isinstance(i, FunctionItem):
             check_refs(i.id, i.uses_fields)
             for link in i.connections:

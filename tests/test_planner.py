@@ -34,6 +34,7 @@ GOOD = {
          "rationale": "Agents see the property", "sources": ["kickoff:3"],
          "estimate_minutes": 15, "module": "Deals", "layout": "Standard", "create_new": False,
          "changes": ["add Property to Deal Information"],
+         "field_placements": [{"field": "Property", "section": "Deal Information"}],
          "acceptance_test": "Open a deal and see the Property field"},
         {"kind": "workflow", "id": "P-003", "title": "Hot lead email",
          "rationale": "Agents react fast", "sources": ["kickoff:4"], "depends_on": ["P-004"],
@@ -90,7 +91,8 @@ def test_good_plan_validates_with_derived_delivery(project):
     units = load_units(project.requirements_dir)
     issues, delivery, coverage = validate(draft(), units, ORG)
     assert errors(issues) == []
-    assert delivery == {"P-001": "decision", "P-002": "api", "P-003": "api",
+    # P-003 sends an email (template needed) -> stays a handoff step
+    assert delivery == {"P-001": "decision", "P-002": "api", "P-003": "handoff",
                         "P-004": "api", "P-005": "api", "P-006": "handoff"}  # fmt: skip
     status = {c.unit_id: c.status for c in coverage}
     assert status == {"kickoff:1": "out_of_scope", "kickoff:2": "covered",
