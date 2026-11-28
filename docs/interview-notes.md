@@ -20,6 +20,17 @@ Zoho's MCP executes changes. My tool delivers projects. The headline feature is 
 **Q: How does the tool handle Zoho's data centres?**
 It never hardcodes the API URL. Authorization starts at accounts.zoho.com. The callback says which accounts server the user belongs to, and the token response returns `api_domain`. Both are stored per org profile.
 
+## Phase 8: Packaging and demo
+
+**Q: How would I try your project without a Zoho account?**
+`uv tool install git+https://github.com/...` then `copilot demo`. The demo runs the real code (ingestion, validation, approval, exports, Deluge checks, Builder apply and rollback, change request) against a stateful fake Zoho that ships in the package, through an in-process HTTP transport. It runs in a throwaway folder with an in-memory keychain, and a test proves it puts the real environment back afterwards.
+
+**Q: Why not just record a video?**
+A video shows it worked once on my machine. A command shows it works on yours, and the same fake backs the test suite, so the demo can't silently rot. (A short screen recording of the demo is still a nice README touch.)
+
+**Q: How did you make sure the one-command install actually works?**
+I installed it from GitHub into an isolated tool folder and ran `copilot --version` and `copilot demo` from there, not from my dev checkout. `copilot doctor` checks a user's setup (Python, keychain backend, API client, orgs, workspace, MCP server) without calling Zoho.
+
 ## Phase 5: Deluge test loop
 
 **Q: How do you test Deluge automatically when automation functions only run from workflows?**
