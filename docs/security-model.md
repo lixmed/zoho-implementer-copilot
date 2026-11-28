@@ -49,6 +49,16 @@ Client refresh tokens, the Zoho client secret, client org metadata, and (never i
 | Untraceable changes | `before.json`, `after.json` and `diff.json` per change set, plus the append-only audit log. |
 | Guessing API formats | Only operations with verified request shapes are automated. The rest stay handoff steps. |
 
+## Phase 5 additions (test loop)
+| Threat | Control |
+|---|---|
+| Record access creeping in | Record scopes only with `--allow-test-records`, per listed module, on developer/sandbox/test orgs only. |
+| Test data leaking or lingering | Fake values from tests.json. Automation suppressed on insert. Records always deleted (failed cleanup is reported with the id). Only the compared fields are read back. |
+| Customer data reaching the LLM via outputs | Output truncated to 2 KB with contact details masked. Test orgs only. |
+| Re-pushing code without consent | The loop shows a diff, and the human types the function name before every push. |
+| A pasted API-key URL sending data elsewhere | Accepted only if it's this function's execute URL on this org's own Zoho API host. Stored in the keychain. |
+| Untraceable executions | Every create, delete and execute is audited (argument keys only). |
+
 ## Planned
 - Phase 4: generalize the write tier (fields, layouts, workflows) with snapshots, diff and rollback, reusing the Phase 3 audit log and approval gates.
 - Phase 7: production profile with a typed confirmation, and API credit budgets.

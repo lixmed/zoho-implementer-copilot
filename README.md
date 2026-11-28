@@ -15,6 +15,11 @@ A local AI copilot for Zoho partners. It turns client requirements into Zoho CRM
 > **Phase 4:** the Builder applies approved plans (custom modules, fields, picklists, layout placement,
 > workflow rules with field-update and task actions) as previewed, typed-confirmed change sets with
 > before/after snapshots, stop-on-failure, and soft rollback by default. See [docs/builder.md](docs/builder.md).
+>
+> **Phase 5:** a Deluge test loop runs each function's test cases in the sandbox. Automation logic
+> lives in a testable core function. Fake test records are created and always cleaned up. The agent
+> fixes failures, you confirm each re-push, and it tracks the first-placement pass rate.
+> See [docs/test-loop.md](docs/test-loop.md).
 
 ## What it does (so far)
 - Connects a Zoho CRM org through Zoho's official OAuth (server-based client, PKCE, localhost redirect). Supports every Zoho data centre.

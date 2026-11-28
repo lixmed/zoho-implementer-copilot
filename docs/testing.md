@@ -14,6 +14,7 @@ uv run pytest
   4. A wrong-slug approval is refused, then the human approves at the CLI.
   5. The sign-off doc and UAT script are exported.
   6. Deluge: the agent gets the function brief. Bad code (hard-coded token, no connection) is refused, and good code is saved with tests. A wrong typed name means nothing is sent. Zoho's compiler rejects the first push, the error is read back, and the second push succeeds. Only the functions endpoint is written to (no workflow calls), and the audit log has both attempts.
+  6b. Test loop: the agent saves `post_hot_lead_core` with a record test. You push it, `deluge test` creates a fake Lead, executes the core, compares, and deletes the record. `get_test_results` shows 1 passed, and the metrics show it passed on first placement.
   7. Builder: `preview_changes` lists the operations (a field, a picklist add) and the handoff items. A wrong typed slug means nothing is sent. The correct slug applies (audited), then a soft rollback runs with no DELETE calls.
   8. The client emails a change request (new feature, one withdrawn). Old unit ids don't move. The agent saves v2.
   9. `plan diff` produces the change request against the approved version, with the effort delta.

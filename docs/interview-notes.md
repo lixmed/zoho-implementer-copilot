@@ -20,6 +20,20 @@ Zoho's MCP executes changes. My tool delivers projects. The headline feature is 
 **Q: How does the tool handle Zoho's data centres?**
 It never hardcodes the API URL. Authorization starts at accounts.zoho.com. The callback says which accounts server the user belongs to, and the token response returns `api_domain`. Both are stored per org profile.
 
+## Phase 5: Deluge test loop
+
+**Q: How do you test Deluge automatically when automation functions only run from workflows?**
+I changed how the code is shaped. The agent writes all logic in a standalone `<name>_core(record_id)` function that I can call over the API, and the automation function is a one-line wrapper that calls it. A test creates a fake record (with automation switched off for that insert), runs the core on it, reads back only the fields the test checks, compares, and always deletes the record. No workflow wiring is needed to get real execution in the org.
+
+**Q: What does the "loop" automate, and what stays human?**
+It automates everything except the decision to write. Tests run, and failures go to the agent as structured problems ("record.Lead_Source = None, expected 'Referral'"). The agent saves a fix, the loop notices the code changed, shows me the diff, and re-pushes only when I type the function name. Then it re-runs. I detect the fix by comparing code hashes, not file timestamps. My first version used timestamps and missed a fix saved while tests were still running; a test caught that race.
+
+**Q: The execute API's scope isn't documented. What did you do?**
+I didn't pretend it was. The tool requests the likely scope behind a flag, and if Zoho refuses it, it falls back to the function's API-key URL. You paste that once, and it's stored in the keychain and only accepted if it's that function's execute URL on that org's own API host. The unverified parts are listed in the docs, waiting for the sandbox run.
+
+**Q: What metric comes out of this?**
+Per function: how many test runs and code versions it took, and whether the first placement passed. Rolled up, that's the "functions passing on first placement" rate, which goes straight into the evaluation suite.
+
 ## Phase 4: Builder
 
 **Q: How do you apply a plan to Zoho safely?**
