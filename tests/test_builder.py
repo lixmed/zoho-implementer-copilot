@@ -202,6 +202,65 @@ def test_gates(env, monkeypatch):
     assert fake.writes == []
 
 
+FN_WORKFLOW = {
+    "kind": "workflow", "id": "P-009", "title": "Post hot lead", "rationale": "slack", "sources": ["reqs:3"],
+    "estimate_minutes": 5, "module": "Leads", "trigger": "create_or_edit", "criteria": "Lead_Source is Website",
+    "conditions": [{"field": "Lead_Source", "comparator": "equal", "value": "Website"}],
+    "actions": [{"type": "function", "details": "post to slack", "function": "post_hot_lead"}],
+}  # fmt: skip
+
+
+def _approve_with(p, extra_items):
+    data = {**PLAN, "items": PLAN["items"] + extra_items}
+    units = load_units(p.requirements_dir)
+    store.save_plan(p, store.PlanDraft.model_validate(data), units, store_org_meta())
+    store.approve(p, store.versions(p)[-1])
+
+
+def store_org_meta():
+    from copilot.planner.validate import OrgMetadata
+
+    return OrgMetadata(available=False)
+
+
+def test_function_attached_workflow_is_created_inactive(env):
+    p, fake = env
+    fake.org_functions["post_hot_lead"] = "fn-777"
+    _approve_with(p, [FN_WORKFLOW])
+    cs = ap.preview(p)
+    op = next(o for o in cs.operations if o.item_id == "P-009")
+    rule = op.request["rule"]
+    assert rule["status"] == {"active": False}
+    assert rule["conditions"][0]["instant_actions"]["actions"] == [
+        {"id": "fn-777", "type": "functions"}
+    ]
+    assert "INACTIVE" in op.summary and "experimental" in op.summary
+    ap.apply(p, yes, no)
+    stored = next(w for w in fake.workflows.values() if w["name"] == "Post hot lead")
+    assert stored["status"] == {"active": False}
+    other = next(w for w in fake.workflows.values() if w["name"] == "Hot lead call task")
+    assert other["status"] == {"active": True}  # rules without functions keep their setting
+
+
+def test_function_must_exist_in_org_before_attaching(env):
+    p, fake = env
+    _approve_with(p, [FN_WORKFLOW])
+    with pytest.raises(ap.ApplyRefusedError, match="push it first"):
+        ap.apply(p, yes, no)
+    assert fake.writes == []
+
+
+def test_inactive_flag_without_function(env):
+    p, fake = env
+    item = {**FN_WORKFLOW, "id": "P-010", "title": "Quiet rule", "active": False,
+            "actions": [{"type": "task", "details": "t", "task": {"subject": "Check", "due_in_days": 0}}]}  # fmt: skip
+    _approve_with(p, [item])
+    ap.apply(p, yes, no)
+    assert next(w for w in fake.workflows.values() if w["name"] == "Quiet rule")["status"] == {
+        "active": False
+    }
+
+
 def test_unknown_section_is_a_build_error(env):
     p, fake = env
     fake.layouts["Deals"][0]["sections"][0]["display_label"] = "Renamed In UI"

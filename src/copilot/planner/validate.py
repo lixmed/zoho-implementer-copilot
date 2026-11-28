@@ -204,6 +204,18 @@ def validate(
                     check_refs(i.id, [f"{i.module}.{a.field_update.field}"])
             if any(a.type == "email_notification" for a in i.actions):
                 warn(i.id, "email notification needs an existing email template (no create API)")
+            fn_actions = [a for a in i.actions if a.type == "function" and a.function]
+            planned_fns = {f.name: f for f in draft.items if isinstance(f, FunctionItem)}
+            for a in fn_actions:
+                f = planned_fns.get(a.function)
+                if f is not None and f.category != "automation":
+                    err(
+                        i.id,
+                        f"function {a.function!r} is {f.category}; workflows can only call automation functions",
+                    )
+            if fn_actions:
+                warn(i.id, "EXPERIMENTAL function attachment: the rule will be created INACTIVE; "
+                     "check the function's argument mapping in Zoho before activating it")  # fmt: skip
             if not i.api_ready():
                 reasons = []
                 if not i.conditions:

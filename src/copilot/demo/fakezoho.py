@@ -49,6 +49,7 @@ class FakeOrg:
         self.workflows: dict[str, dict] = {}
         self.actions: dict[str, dict] = {}
         self.profiles = [{"id": "pr1", "name": "Administrator"}]
+        self.org_functions: dict[str, str] = {}  # api_name -> id (functions already in the org)
         self.fail_on: str | None = None  # e.g. "POST workflow_rules" to inject a failure
         self.writes: list[str] = []
 
@@ -105,6 +106,12 @@ class FakeOrg:
             )
         if method == "GET" and path == "/settings/profiles":
             return httpx.Response(200, json={"profiles": self.profiles})
+        if method == "GET" and path == "/settings/functions":
+            fns = [
+                {"api_name": n, "id": i, "category": "automation"}
+                for n, i in self.org_functions.items()
+            ]
+            return httpx.Response(200, json={"functions": fns})
 
         if method == "POST" and path == "/settings/modules":
             mod = body["modules"][0]
@@ -203,8 +210,13 @@ class FakeOrg:
             rid = self.new_id()
             rule = body["workflow_rules"][0]
             for a in rule["conditions"][0]["instant_actions"]["actions"]:
-                assert a["id"] in self.actions, f"rule references unknown action {a['id']}"
-            self.workflows[rid] = {"id": rid, **rule, "status": {"active": True}}
+                known = self.org_functions.values() if a["type"] == "functions" else self.actions
+                assert a["id"] in known, f"rule references unknown {a['type']} {a['id']}"
+            self.workflows[rid] = {
+                "id": rid,
+                **rule,
+                "status": rule.get("status", {"active": True}),
+            }
             return self.ok("workflow_rules", rid)
         if (
             m := re.fullmatch(r"/settings/automation/workflow_rules/(\w+)", path)

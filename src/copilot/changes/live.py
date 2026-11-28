@@ -53,6 +53,13 @@ class LiveOrg:
             self._workflows = body.get("workflow_rules", [])
         return self._workflows
 
+    def function_by_name(self, api_name: str) -> dict | None:
+        if not hasattr(self, "_functions") or self._functions is None:
+            self._functions = self.c.get("/settings/functions", use_cache=False).get(
+                "functions", []
+            )
+        return next((f for f in self._functions if f.get("api_name") == api_name), None)
+
     def profiles(self) -> list[dict]:
         if self._profiles is None:
             self._profiles = self.c.get("/settings/profiles").get("profiles", [])

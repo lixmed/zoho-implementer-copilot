@@ -21,7 +21,9 @@ The org must be connected with write scopes (`--allow-writes`). Phase 4 adds: mo
 | `picklist_change` | values not already present | `PATCH /settings/fields/{id}` (add/rename); retire = layout keep-list |
 | `layout` (edit) | has structured `field_placements` | `PATCH /settings/layouts/{id}`: move field to section, set required |
 | `workflow` | structured `conditions`, trigger create/edit/create_or_edit/delete, only `field_update`/`task` actions with specs | actions first (`POST …/field_updates`, `…/tasks`), then `POST …/workflow_rules` referencing their ids |
-| everything else | never | handoff pack (email notifications need an existing template; webhooks, function attachment, new layouts, validation rules, buttons, blueprints) |
+| `workflow` with a `function` action | the function is already in the org (push it first) | **EXPERIMENTAL.** The rule is created **inactive** (`status.active=false` in the create body) with `{"id": <function id>, "type": "functions"}` as the action. Zoho's workflow metadata lists `functions` as a valid action, but the create docs show no sample. Check the argument mapping in Zoho before activating. |
+| any `workflow` with `"active": false` | always | created inactive |
+| everything else | never | handoff pack (email notifications need an existing template; webhooks, new layouts, validation rules, buttons, blueprints) |
 
 Items already present in the org are **skipped**, so running `apply` twice is safe.
 

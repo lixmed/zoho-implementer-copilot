@@ -327,6 +327,14 @@ class _Builder:
                     {"spec": spec},
                 )
                 action_refs.append({"id": _ref(op), "type": "tasks"})
+            elif a.type == "function" and a.function:
+                fn = self.live.function_by_name(a.function)
+                if not fn:
+                    return self.error(
+                        it.id,
+                        f"function {a.function!r} is not in the org yet: push it first (copilot deluge push)",
+                    )
+                action_refs.append({"id": str(fn["id"]), "type": "functions"})  # EXPERIMENTAL
         group = [
             {"comparator": c.comparator, "field": {"api_name": c.field}, "value": c.value}
             for c in it.conditions
@@ -341,12 +349,16 @@ class _Builder:
                 "criteria_details": {"criteria": {"group_operator": it.condition_operator, "group": group}},
                 "instant_actions": {"actions": action_refs},
             }],
+            "status": {"active": not it.creates_inactive},
         }  # fmt: skip
+        state = "INACTIVE" if it.creates_inactive else "active"
+        has_fn = any(a.type == "function" for a in it.actions)
         self.add(
             it.id,
             "create_workflow",
             it.module,
-            f"workflow {name!r} on {it.module} ({it.trigger})",
+            f"workflow {name!r} on {it.module} ({it.trigger}), created {state}"
+            + (" with function attached (experimental)" if has_fn else ""),
             {"rule": rule},
         )
 

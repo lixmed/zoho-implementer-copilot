@@ -200,16 +200,20 @@ def test_fix_loop_waits_for_fix_confirms_push_and_reruns(env):
     reports, diffs = [], []
 
     def agent_fixes_later():
-        time.sleep(0.3)
+        time.sleep(0.2)
         save(p, "mark_referral_core", CORE.replace('info "x"', 'info "fixed"'), [RECORD_TEST])
 
     def push():
         rt.define("mark_referral_core", set_referral)  # the pushed code now behaves correctly
         return {"pushed": True}
 
-    threading.Thread(target=agent_fixes_later, daemon=True).start()
+    def report(run):
+        reports.append(run)
+        if len(reports) == 1:  # like a real agent: react to the failing run's results
+            threading.Thread(target=agent_fixes_later, daemon=True).start()
+
     final = tl.fix_loop(p, "mark_referral_core", confirm_push=lambda d: diffs.append(d) or True,
-                        push=push, report=reports.append, wait_seconds=10, poll=0.05)  # fmt: skip
+                        push=push, report=report, wait_seconds=10, poll=0.05)  # fmt: skip
     assert final.all_passed
     assert [r.all_passed for r in reports] == [False, True]
     assert '+\tinfo "fixed";' in diffs[0]
@@ -219,8 +223,13 @@ def test_fix_loop_declined_push_stops(env):
     p, rt = env
     rt.define("mark_referral_core", lambda a, r: {"status": "ok"})
     save(p, "mark_referral_core", CORE, [RECORD_TEST])
-    threading.Timer(0.2, lambda: save(p, "mark_referral_core", CORE + "\n", [RECORD_TEST])).start()
     pushed = []
+
+    def report(_run):
+        threading.Timer(
+            0.1, lambda: save(p, "mark_referral_core", CORE + "\n", [RECORD_TEST])
+        ).start()
+
     final = tl.fix_loop(p, "mark_referral_core", confirm_push=lambda d: False, push=lambda: pushed.append(1) or {"pushed": True},
-                        report=lambda r: None, wait_seconds=10, poll=0.05)  # fmt: skip
+                        report=report, wait_seconds=10, poll=0.05)  # fmt: skip
     assert not final.all_passed and pushed == []

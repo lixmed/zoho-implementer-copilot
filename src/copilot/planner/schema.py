@@ -121,11 +121,18 @@ class WorkflowAction(BaseModel):
         default=None, description="needed to apply via API"
     )
     task: TaskSpec | None = Field(default=None, description="needed to apply via API")
+    function: str | None = Field(
+        default=None,
+        description="api_name of an automation function already in the org (type=function). "
+        "EXPERIMENTAL: the rule is always created INACTIVE; check argument mapping in Zoho before activating.",
+    )
 
     def api_ready(self) -> bool:
-        """Only field updates and tasks have verified request formats (Phase 4)."""
-        return (self.type == "field_update" and self.field_update is not None) or (
-            self.type == "task" and self.task is not None
+        """Field updates and tasks have verified formats; function attachment is experimental."""
+        return (
+            (self.type == "field_update" and self.field_update is not None)
+            or (self.type == "task" and self.task is not None)
+            or (self.type == "function" and bool(self.function))
         )
 
 
@@ -149,6 +156,14 @@ class WorkflowItem(_Item):
         default_factory=list, description="structured criteria; needed to apply via API"
     )
     condition_operator: Literal["and", "or"] = "and"
+    active: bool = Field(
+        default=True,
+        description="create the rule active; rules with a function action are always created inactive",
+    )
+
+    @property
+    def creates_inactive(self) -> bool:
+        return not self.active or any(a.type == "function" for a in self.actions)
 
     def api_ready(self) -> bool:
         return (
