@@ -565,9 +565,74 @@ def cmd_serve(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_demo(args: argparse.Namespace) -> int:
+    from copilot.demo.run import run_demo
+
+    return run_demo(Path(args.out) if args.out else None)
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    """Check the local setup without touching Zoho."""
+    import keyring as _keyring
+
+    from copilot import __version__
+    from copilot.orgs.registry import home_dir
+    from copilot.projects.workspace import WorkspaceNotConfiguredError, workspace_root
+
+    ok = True
+
+    def line(good: bool, label: str, detail: str, fix: str = "") -> None:
+        nonlocal ok
+        ok &= good
+        print(
+            f"{'OK ' if good else '-- '} {label:22} {detail}"
+            + (f"\n     fix: {fix}" if not good and fix else "")
+        )
+
+    print(f"zoho-implementer-copilot {__version__} (Python {sys.version.split()[0]})")
+    line(sys.version_info >= (3, 12), "python", sys.version.split()[0], "install Python 3.12+")
+    backend = type(_keyring.get_keyring()).__name__
+    line("fail" not in backend.lower() and "null" not in backend.lower(), "keychain", backend,
+         "install a keyring backend (Windows/macOS have one built in)")  # fmt: skip
+    line(True, "data folder", str(home_dir()))
+    try:
+        creds = secrets.load_client()
+        line(
+            True,
+            "zoho api client",
+            f"configured (secrets for: {', '.join(sorted(creds.secrets)) or 'none'})",
+        )
+    except secrets.MissingSecretError:
+        line(False, "zoho api client", "not configured", "copilot client set --dc us")
+    orgs = OrgRegistry().list()
+    line(bool(orgs), "connected orgs", ", ".join(f"{o.slug} ({o.environment})" for o in orgs) or "none",
+         "copilot connect --name 'My Dev Org' --env developer")  # fmt: skip
+    try:
+        line(True, "projects folder", str(workspace_root()))
+    except WorkspaceNotConfiguredError:
+        line(False, "projects folder", "not set", "copilot workspace set C:/path/to/ZohoProjects")
+    try:
+        from copilot.mcp_server.server import server as _server  # noqa: F401
+
+        line(True, "mcp server", "loads")
+    except Exception as exc:  # noqa: BLE001
+        line(False, "mcp server", f"failed to load: {exc}")
+    print("\nNo Zoho account yet? Try: copilot demo")
+    return 0 if ok else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
+    from copilot import __version__
+
     p = argparse.ArgumentParser(prog="copilot", description="Zoho Implementer Copilot")
+    p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = p.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("doctor", help="check the local setup (no Zoho calls)").set_defaults(
+        func=cmd_doctor
+    )
+    dm = sub.add_parser("demo", help="run the whole workflow offline against a built-in fake Zoho")
+    dm.add_argument("--out", help="folder for the demo's output files (default: a temp folder)")
+    dm.set_defaults(func=cmd_demo)
 
     client = sub.add_parser("client", help="manage the Zoho API client credentials")
     client_sub = client.add_subparsers(dest="client_cmd", required=True)
