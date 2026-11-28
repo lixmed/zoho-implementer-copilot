@@ -6,6 +6,7 @@ the dev org is connected we'll record real responses and diff them against these
 
 from __future__ import annotations
 
+import httpx
 import respx
 
 ACCOUNTS = "https://accounts.zoho.com"
@@ -254,3 +255,19 @@ def mount(router: respx.Router, api: str = DEV_API) -> None:
     router.get(f"{base}/settings/roles").respond(200, json=ROLES)
     router.get(f"{base}/settings/profiles").respond(200, json=PROFILES)
     router.get(f"{base}/users").respond(200, json=USERS)
+
+    def picklist(request):
+        fid = request.url.path.split("/settings/fields/")[1].split("/")[0]
+        for body in FIELDS.values():
+            for f in body["fields"]:
+                if f["id"] == fid:
+                    vals = [
+                        {"id": f"{fid}-{n}", **v}
+                        for n, v in enumerate(f.get("pick_list_values", []))
+                    ]
+                    return httpx.Response(200, json={"pick_list_values": vals})
+        return httpx.Response(204)
+
+    router.get(url__regex=rf"{base}/settings/fields/\w+/pick_list_values").mock(
+        side_effect=picklist
+    )

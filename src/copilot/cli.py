@@ -58,10 +58,13 @@ def cmd_connect(args: argparse.Namespace) -> int:
     verifier, challenge = oauth.new_pkce_pair()
     scopes = oauth.LEVEL1_SCOPES
     if args.allow_writes:
-        from copilot.zoho.write import FUNCTION_WRITE_SCOPES
+        from copilot.zoho.write import BUILDER_WRITE_SCOPES, FUNCTION_WRITE_SCOPES
 
-        scopes = scopes + FUNCTION_WRITE_SCOPES
-        print("Requesting write scopes for Deluge functions (create/update only).")
+        scopes = scopes + FUNCTION_WRITE_SCOPES + BUILDER_WRITE_SCOPES
+        print(
+            "Requesting write scopes: Deluge functions, modules, fields, layouts, "
+            "workflow rules and their actions (no record access)."
+        )
     url = oauth.build_authorize_url(creds.client_id, redirect, scopes, state, challenge)
 
     print(f"Redirect URI (must be registered in api-console.zoho.com): {redirect}")
@@ -369,6 +372,91 @@ def cmd_deluge_push(args: argparse.Namespace) -> int:
     return 0
 
 
+def _typed(expected: str):
+    def ask(prompt: str) -> bool:
+        return input(prompt).strip().lstrip("﻿") == expected
+
+    return ask
+
+
+def cmd_changes_preview(args: argparse.Namespace) -> int:
+    from copilot.changes.apply import ApplyRefusedError, preview
+    from copilot.changes.build import render_preview
+    from copilot.projects.workspace import open_project
+
+    try:
+        cs = preview(open_project(args.project))
+    except ApplyRefusedError as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 2
+    print(render_preview(cs))
+    return 1 if cs.errors else 0
+
+
+def cmd_changes_list(args: argparse.Namespace) -> int:
+    from copilot.changes.apply import list_changesets
+    from copilot.projects.workspace import open_project
+
+    for cs in list_changesets(open_project(args.project)):
+        done = sum(o.status == "applied" for o in cs.operations)
+        print(
+            f"{cs.id}  plan v{cs.plan_version}  {cs.status:20} {done}/{len(cs.operations)} applied  org={cs.org}"
+        )
+    return 0
+
+
+def cmd_apply(args: argparse.Namespace) -> int:
+    from copilot.changes.apply import ApplyRefusedError, apply, changesets_dir
+    from copilot.changes.build import render_preview
+    from copilot.projects.workspace import open_project
+
+    p = open_project(args.project)
+
+    def offer_rollback(cs) -> bool:
+        applied = sum(o.status == "applied" for o in cs.operations)
+        print(render_preview(cs))
+        return _typed("ROLLBACK")(
+            f"Stopped at a failure after {applied} applied operation(s). "
+            "Type ROLLBACK to undo them (soft: hide/deactivate), or anything else to keep them: "
+        )
+
+    try:
+        cs = apply(p, _typed(p.slug), offer_rollback)
+    except ApplyRefusedError as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 2
+    if not cs.operations:
+        print(
+            "Nothing to apply: the org already matches the approved plan (or only handoff items remain)."
+        )
+        return 0
+    if cs.status == "preview":
+        print("Not applied.")
+        return 1
+    print(render_preview(cs))
+    print(f"Saved: {changesets_dir(p) / cs.id}")
+    return 0 if cs.status == "applied" else 1
+
+
+def cmd_rollback(args: argparse.Namespace) -> int:
+    from copilot.changes.apply import ApplyRefusedError, rollback
+    from copilot.changes.build import render_preview
+    from copilot.projects.workspace import open_project
+
+    try:
+        cs = rollback(
+            open_project(args.project),
+            args.changeset,
+            hard=args.hard,
+            confirm_hard=_typed("DELETE"),
+        )
+    except ApplyRefusedError as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 2
+    print(render_preview(cs))
+    return 0 if cs.status == "rolled_back" else 1
+
+
 def cmd_audit(args: argparse.Namespace) -> int:
     from copilot.audit.log import AuditLog
 
@@ -460,6 +548,31 @@ def build_parser() -> argparse.ArgumentParser:
     pe.add_argument("what", nargs="+", choices=["signoff", "uat"])
     pe.add_argument("--version", type=int)
     pe.set_defaults(func=cmd_plan_export)
+
+    ch = sub.add_parser("changes", help="preview or list change sets")
+    ch_sub = ch.add_subparsers(dest="changes_cmd", required=True)
+    cp = ch_sub.add_parser(
+        "preview", help="what applying the approved plan would change (read-only)"
+    )
+    cp.add_argument("project")
+    cp.set_defaults(func=cmd_changes_preview)
+    cl = ch_sub.add_parser("list")
+    cl.add_argument("project")
+    cl.set_defaults(func=cmd_changes_list)
+
+    ap = sub.add_parser(
+        "apply", help="apply the approved plan to the dev/sandbox org (typed confirm)"
+    )
+    ap.add_argument("project")
+    ap.set_defaults(func=cmd_apply)
+
+    rb = sub.add_parser("rollback", help="undo a change set (soft by default)")
+    rb.add_argument("project")
+    rb.add_argument("--changeset", help="default: the latest one")
+    rb.add_argument(
+        "--hard", action="store_true", help="DELETE created fields/workflows (typed DELETE)"
+    )
+    rb.set_defaults(func=cmd_rollback)
 
     dl = sub.add_parser("deluge", help="check and push Deluge functions")
     dl_sub = dl.add_subparsers(dest="deluge_cmd", required=True)

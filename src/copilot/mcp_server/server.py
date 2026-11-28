@@ -303,6 +303,27 @@ def get_push_result(project: str, name: str) -> dict:
     return handoff.last_push(_project(project), name) or {"pushed": None, "message": "never pushed"}
 
 
+@_read_tool
+def preview_changes(project: str) -> dict:
+    """What applying the latest APPROVED plan would change in the org right now: ordered
+    operations, API credits, items already done (skipped) and items left as handoff.
+    Read-only. Applying is a human CLI action (`copilot apply`)."""
+    from copilot.changes.apply import preview
+
+    cs = preview(_project(project))
+    return {
+        "operations": [
+            o.model_dump(include={"op_id", "item_id", "kind", "summary", "credits"})
+            for o in cs.operations
+        ],
+        "credits": cs.credits,
+        "skipped": [s.model_dump() for s in cs.skipped],
+        "handoff": [s.model_dump() for s in cs.handoff],
+        "errors": cs.errors,
+        "next_step": f"Human reviews and runs: copilot apply {project}",
+    }
+
+
 PLAN_PROMPT = """\
 You are helping a Zoho CRM implementer turn client requirements into an implementation plan.
 

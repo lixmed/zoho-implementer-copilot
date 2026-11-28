@@ -274,6 +274,29 @@ def test_acme_realty_full_story(tmp_path, monkeypatch, capsys):
     assert [e["result"] for e in audit] == ["success", "error:COMPILATION_ERROR"]
     assert all("slack.com" not in (e["after_json"] or "") for e in audit)  # code not stored
 
+    # --- 7c. Builder: preview, typed apply, audit, soft rollback --------------------------
+    preview = call("preview_changes", project=SLUG)
+    assert [(o["item_id"], o["kind"]) for o in preview["operations"]] == [
+        ("P-002", "create_field"), ("P-001", "picklist_add")]  # fmt: skip
+    handoff_ids = {h["item_id"] for h in preview["handoff"]}
+    assert {"P-003", "P-004"} <= handoff_ids  # free-text workflow/layout items stay manual
+    ok = {"code": "SUCCESS", "status": "success", "message": "ok"}
+    respx.post(f"{fake_zoho.DEV_API}/crm/v8/settings/fields").respond(
+        201, json={"fields": [ok | {"details": {"id": "888001"}}]})  # fmt: skip
+    respx.patch(f"{fake_zoho.DEV_API}/crm/v8/settings/fields/f3").respond(
+        200, json={"fields": [ok | {"details": {"id": "f3"}}]})  # fmt: skip
+    monkeypatch.setattr(builtins, "input", lambda prompt="": "nope")
+    assert cli.main(["apply", SLUG]) == 1  # wrong slug: nothing sent
+    assert AuditLog().entries(org=ORG)[0]["action"] != "create_fields"
+    monkeypatch.setattr(builtins, "input", lambda prompt="": SLUG)
+    assert cli.main(["apply", SLUG]) == 0
+    assert [e["action"] for e in AuditLog().entries(org=ORG)[:2]] == [
+        "update_field",
+        "create_fields",
+    ]
+    assert cli.main(["rollback", SLUG]) == 0  # soft: hides the field, deletes nothing
+    assert not [c for c in respx.calls if c.request.method == "DELETE"]
+
     # --- 8. change request: viewing feedback, and Slack is dropped -----------------------
     write_email(
         req_dir / "cr-viewings.eml",
