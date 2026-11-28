@@ -43,13 +43,32 @@ House conventions (checked by check_deluge):
 - Log each step with info, and build a result map: {"status": "ok"|"error", "steps": [...], "error": ...}.
   Standalone/button functions return result.toString(); automation functions log it with info.
 - Use the exact field api_names from the brief; never guess a field name.
+- Automation functions use CORE + WRAPPER so they can be tested without a workflow:
+  * <name>_core: string standalone.<name>_core(String record_id) holds ALL the logic and returns
+    result.toString() with a "status" key. This is what the test loop executes.
+  * <name>: the automation function is a thin wrapper whose body only calls the core with the
+    record id and logs the result. Save both with save_deluge (core name = "<name>_core").
 """
+
+CORE_SUFFIX = "_core"
 
 
 class TestCase(BaseModel):
+    """One test. For record-based tests (automation cores), `record` is created first and its id
+    replaces "$record_id" anywhere in `input`; `expect_record` is checked by reading it back."""
+
     name: str
-    input: dict = Field(description="arguments or the test record's field values")
-    expected: dict = Field(description="expected result map keys or record field values after")
+    input: dict = Field(
+        description='arguments for the function; use "$record_id" for the test record id'
+    )
+    expected: dict = Field(
+        description="expected keys/values in the returned result map (subset match)"
+    )
+    module: str | None = Field(default=None, description="module of the test record, e.g. Leads")
+    record: dict | None = Field(default=None, description="fake field values for the test record")
+    expect_record: dict | None = Field(
+        default=None, description="field values expected on the record afterwards"
+    )
 
 
 class FunctionNotInPlanError(LookupError):
@@ -68,9 +87,18 @@ def plan_for_functions(project: Project) -> Plan:
 
 
 def find_function(plan: Plan, name: str) -> FunctionItem:
+    """A planned function, or the testable `<automation>_core` companion of one."""
     for item in plan.items:
         if isinstance(item, FunctionItem) and item.name == name:
             return item
+    if name.endswith(CORE_SUFFIX):
+        base = find_function(plan, name[: -len(CORE_SUFFIX)])
+        if base.category == "automation":
+            return base.model_copy(update={
+                "name": name, "category": "standalone",
+                "purpose": f"core logic of {base.name} (callable by the test loop)",
+                "arguments": {"record_id": next(iter(base.arguments.values()), "record id")},
+            })  # fmt: skip
     names = [i.name for i in plan.items if isinstance(i, FunctionItem)]
     raise FunctionNotInPlanError(f"function {name!r} is not in plan v{plan.version} (has: {names})")
 

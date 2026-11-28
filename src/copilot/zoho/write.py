@@ -32,6 +32,17 @@ BUILDER_WRITE_SCOPES = (
     "ZohoCRM.settings.workflow_rules.UPDATE",
     "ZohoCRM.settings.workflow_rules.DELETE",
 )
+# Undocumented in the current docs (the execute endpoint is documented, its scope is not).
+# Requested only with --allow-test-records; if the consent page rejects it, reconnect with
+# --no-execute-scope and use the function's API-key URL instead.
+FUNCTION_EXECUTE_SCOPES = ("ZohoCRM.functions.execute.READ", "ZohoCRM.functions.execute.CREATE")
+
+
+def test_record_scopes(modules: list[str]) -> tuple[str, ...]:
+    """Module-specific record scopes (format from the scopes doc: ZohoCRM.modules.leads.READ)."""
+    return tuple(f"ZohoCRM.modules.{m.lower()}.ALL" for m in modules)
+
+
 _RESULT_KEYS = (
     "functions", "data", "fields", "layouts", "modules", "workflow_rules", "field_updates", "tasks",
 )  # fmt: skip
@@ -331,6 +342,56 @@ class ZohoWriteClient:
             None,
             before,
         )
+
+    # ------------------------------------------------------------------ Phase 5 (test loop)
+
+    def create_test_record(self, module: str, fields: dict) -> ZohoWriteResult:
+        """Insert one fake record with automation suppressed ("trigger": [] stops workflows,
+        approvals and blueprints from firing on it)."""
+        body = {"data": [fields], "trigger": []}
+        return self._json("create_test_record", module, "POST", f"/{module}", body)
+
+    def delete_test_record(self, module: str, record_id: str) -> ZohoWriteResult:
+        return self._json(
+            "delete_test_record", f"{module}:{record_id}", "DELETE", f"/{module}/{record_id}"
+        )
+
+    def execute_function(
+        self, api_name: str, arguments: dict, api_key_url: str | None = None
+    ) -> dict:
+        """Run a REST-enabled function. OAuth by default; or the function's API-key URL
+        (validated: same Zoho API host, the execute path of THIS function). Audited."""
+        if api_key_url:
+            url, params, headers = api_key_url, None, {}
+        else:
+            url = f"{self.base}/functions/{api_name}/actions/execute"
+            params = {"auth_type": "oauth"}
+            headers = {"Authorization": f"Zoho-oauthtoken {self._tokens.get()}"}
+        resp = self._http.post(
+            url, params=params, data={"arguments": json.dumps(arguments)}, headers=headers
+        )
+        try:
+            payload = resp.json()
+        except ValueError:
+            payload = {"code": "HTTP_ERROR", "message": resp.text[:300]}
+        self._audit.record(
+            org=self.org.slug,
+            environment=self.org.environment,
+            action="execute_function",
+            target=api_name,
+            result="success"
+            if resp.status_code < 300
+            else f"error:{payload.get('code', resp.status_code)}",
+            after={
+                "auth": "api_key_url" if api_key_url else "oauth",
+                "argument_keys": sorted(arguments),
+                "http_status": resp.status_code,
+                "code": payload.get("code"),
+            },  # fmt: skip
+            project=self._project,
+            plan_version=self._plan_version,
+        )
+        return {"http_status": resp.status_code, **payload}
 
     # ------------------------------------------------------------------ Phase 3 (functions)
 
